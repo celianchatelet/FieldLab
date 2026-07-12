@@ -7,10 +7,31 @@ class Field:
     V: np.ndarray
     fixed_mask: np.ndarray
     solid_mask: np.ndarray = None
+
+
+
+
     h: float = 1.0
     walls: dict = None
     omega: float = None
     source: np.ndarray = None
+
+
+
+
+
+    kappa: np.ndarray = None
+
+
+
+
+    taille_domaine: float = 1.0
+
+
+
+
+
+    rho_cp: np.ndarray = None
 
     free: np.ndarray = field(init=False, repr=False)
     rouge: np.ndarray = field(init=False, repr=False)
@@ -22,6 +43,10 @@ class Field:
             self.solid_mask = np.zeros(self.V.shape, dtype=bool)
         if self.source is None:
             self.source = np.zeros(self.V.shape)
+        if self.kappa is None:
+            self.kappa = np.ones(self.V.shape)
+        if self.rho_cp is None:
+            self.rho_cp = np.ones(self.V.shape)
         if self.walls is None:
             self.walls = {c: ("neumann",) for c in ("haut", "bas", "gauche", "droite")}
         if self.V.shape != self.fixed_mask.shape:
@@ -48,4 +73,5 @@ class Field:
     def copy(self):
         return Field(self.V.copy(), self.fixed_mask.copy(),
                      self.solid_mask.copy(), self.h, dict(self.walls),
-                     self.omega, self.source.copy())
+                     self.omega, self.source.copy(), self.kappa.copy(),
+                     self.taille_domaine, self.rho_cp.copy())

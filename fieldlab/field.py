@@ -19,7 +19,9 @@ def champ_magnetique(field):
     return Bx, By, np.hypot(Bx, By)
 
 
-def flux_thermique(field, k=1.0):
+def flux_thermique(field, k=None):
+    if k is None:
+        k = field.kappa
     dTdy, dTdx = np.gradient(field.V, field.h)
     phix = -k * dTdx
     phiy = -k * dTdy

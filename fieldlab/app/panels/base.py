@@ -1,159 +1,935 @@
-"""Panneau de base commun a tous les domaines.
+import copy
+import inspect
 
-Contient : titre, selecteur de scenario, resolution N, solveur, visualisation,
-barre d'action figee en bas (Lancer / Reinitialiser / progression / statut).
+import numpy as np
 
-Les sous-classes (ElectrostatiquePanel, MagnetoPanel, ThermiquePanel) surchargent :
-  _build_domain_params(host, dom) : section "Parametres" propre au domaine
-  _build_sources_obstacles(host, dom) : section sources / obstacles / fils
-  _build_walls(host, dom) : section "Parois"
-  _charger_parois(event) : charge les valeurs par defaut du scenario courant
-  contribute_params(d) : ajoute les cles propres au domaine dans le dict de
-                         read_params() (v, walls, obstacles, q, ...)
-  _vider_obstacles() : remet a zero la liste de sources/obstacles
-"""
-import tkinter as tk
-from tkinter import ttk
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QCheckBox, QComboBox, QDoubleSpinBox, QGroupBox, QHBoxLayout, QLabel,
+    QLineEdit, QMessageBox, QProgressBar, QPushButton, QScrollArea,
+    QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
+)
 
 from fieldlab.solvers import METHODES
 from fieldlab.solvers.sor import omega_optimal
-from fieldlab.app.widgets import ScrollableFrame
+from fieldlab.sources import NOMS_FORMES
 from fieldlab import viz
+from fieldlab import geometries as geo
+from fieldlab.geometries import NOM_SCENE_LIBRE_2D
+from fieldlab.fem3d import render as fem3d_render
+from fieldlab.app.scene_editor_panel import SceneEditorPanel
 
 COTES = ["haut", "bas", "gauche", "droite"]
+_PREFIXE_SCENE_LIBRE = "Scène libre"
 
 
-class BasePanel(ttk.Frame):
-    """Panneau de controle de base (un domaine fixe)."""
+def make_double_spin(default=0.0, minv=-1.0e6, maxv=1.0e6, decimals=4, step=1.0):
+    s = QDoubleSpinBox()
+    s.setRange(minv, maxv)
+    s.setDecimals(decimals)
+    s.setSingleStep(step)
+    s.setValue(default)
+    return s
 
-    def __init__(self, master, page):
-        super().__init__(master)
-        self.page = page
-        dom = page.domaine
 
-        self.var_geom = tk.StringVar(value=next(iter(dom.scenarios)))
-        self.var_N = tk.IntVar(value=120)
-        self.var_meth = tk.StringVar(value="SOR")
-        self.var_omega = tk.DoubleVar(value=1.9)
-        self.var_maxiter = tk.IntVar(value=8000)
-        self.var_tol = tk.StringVar(value="1e-5")
-        self.var_viz = tk.StringVar(value=viz.KINDS[0])
+def make_int_spin(default, minv=1, maxv=2_000_000, step=1):
+    s = QSpinBox()
+    s.setRange(minv, maxv)
+    s.setSingleStep(step)
+    s.setValue(default)
+    return s
 
-        # Barre d'action figee en bas (creee avant le scroll pour toujours etre visible)
-        self.bottom = ttk.Frame(self, padding=(10, 6))
-        self.bottom.pack(side="bottom", fill="x")
-        self.run_btn = ttk.Button(self.bottom, text="Lancer la simulation",
-                                  command=self.page.run_simulation)
-        self.run_btn.pack(fill="x", pady=(0, 3))
-        ttk.Button(self.bottom, text="Reinitialiser",
-                   command=self.page.reinitialiser).pack(fill="x", pady=(0, 3))
-        self.progress = ttk.Progressbar(self.bottom, maximum=100)
-        self.progress.pack(fill="x")
-        self.status = ttk.Label(self.bottom, text="Pret.", foreground="gray")
-        self.status.pack(anchor="w")
 
-        # Zone defilante (haut)
-        self.scroll = ScrollableFrame(self)
-        self.scroll.pack(side="top", fill="both", expand=True)
+class BasePanel(QWidget):
+    SUPPORTE_3D = False
+    SCENARIOS_3D: dict = {}
 
-        self._build(dom, self.scroll.body)
 
-    # ------------------------------------------------------------------ build
-    def _build(self, dom, host):
-        ttk.Label(host, text=dom.nom, font=("", 15, "bold")).pack(anchor="w")
-        ttk.Label(host, text=f"{dom.scalaire}  -  {dom.champ}",
-                  foreground="gray").pack(anchor="w", pady=(0, 6))
 
-        # Geometrie / scenario
-        g = ttk.LabelFrame(host, text="Geometrie", padding=6)
-        g.pack(fill="x", pady=3)
-        cbg = ttk.Combobox(g, textvariable=self.var_geom, values=list(dom.scenarios),
-                           state="readonly")
-        cbg.pack(fill="x")
-        cbg.bind("<<ComboboxSelected>>", self._on_scenario_change)
 
-        # Parametres propres au domaine (surcharger dans les sous-classes)
-        self._build_domain_params(host, dom)
 
-        # Sources / obstacles propres au domaine
-        self._build_sources_obstacles(host, dom)
+    EDITION_3D = True
 
-        # Parois propres au domaine
-        self._build_walls(host, dom)
 
-        # Solveur (commun)
-        s = ttk.LabelFrame(host, text="Solveur", padding=6)
-        s.pack(fill="x", pady=3)
-        r = ttk.Frame(s); r.pack(fill="x")
-        ttk.Label(r, text="Methode", width=10).pack(side="left")
-        ttk.Combobox(r, textvariable=self.var_meth, values=METHODES,
-                     state="readonly", width=14).pack(side="left")
-        ttk.Label(s, text="Omega (SOR)").pack(anchor="w", pady=(3, 0))
-        ttk.Scale(s, from_=1.0, to=1.99, variable=self.var_omega,
-                  orient="horizontal").pack(fill="x")
-        ttk.Button(s, text="Omega optimal", command=self._omega_opt).pack(anchor="w")
-        self._row(s, "Iter. max", self.var_maxiter)
-        self._row(s, "Tolerance", self.var_tol)
 
-        # Visualisation (commune)
-        vz = ttk.LabelFrame(host, text="Visualisation", padding=6)
-        vz.pack(fill="x", pady=3)
-        cb = ttk.Combobox(vz, textvariable=self.var_viz, values=viz.KINDS,
-                          state="readonly")
-        cb.pack(fill="x")
-        cb.bind("<<ComboboxSelected>>",
-                lambda e: self.page.plot.redraw(self.var_viz.get()))
 
-        # Charge les parois du scenario initial
+
+
+
+
+    PAROIS_3D_KINDS = ("neumann", "dirichlet")
+    LIBELLES_PAROI_3D = {"neumann": ("", ""), "dirichlet": ("valeur", "")}
+
+    def __init__(self, controller, parent=None):
+        super().__init__(parent)
+        self.controller = controller
+        dom = controller.domaine
+        self._defaut_magnetique_3d_applique = False
+        self._boutons_placement_2d = []
+        self._chargement_scene_2d = False
+        self._dernier_scenario_2d = None
+        self._parois_scene_libre_2d = None
+
+        self.spin_N = make_int_spin(120, minv=10, maxv=1000)
+        self.cb_meth = QComboBox(); self.cb_meth.addItems(METHODES)
+
+
+
+
+
+        self.cb_meth.setCurrentText("FEM (direct)")
+        self.spin_omega = make_double_spin(1.9, 1.0, 1.99, decimals=3, step=0.01)
+        self.spin_maxiter = make_int_spin(8000, minv=1, maxv=1_000_000, step=100)
+        self.edit_tol = QLineEdit("1e-5")
+        self.spin_refine = make_int_spin(0, minv=0, maxv=4, step=1)
+        self.cb_viz = QComboBox(); self.cb_viz.addItems(viz.KINDS)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        body = QWidget()
+        self.body_layout = QVBoxLayout(body)
+        self.body_layout.setContentsMargins(8, 8, 8, 8)
+        self.scroll.setWidget(body)
+        outer.addWidget(self.scroll, stretch=1)
+
+
+        self.bottom = QWidget()
+        bl = QVBoxLayout(self.bottom)
+        bl.setContentsMargins(10, 6, 10, 6)
+        actions = QHBoxLayout()
+        self.run_btn = QPushButton("Lancer la simulation")
+        self.run_btn.clicked.connect(self.controller.run_simulation)
+        actions.addWidget(self.run_btn, stretch=2)
+        self.cancel_btn = QPushButton("Annuler")
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self.controller.annuler)
+        actions.addWidget(self.cancel_btn)
+        self.reset_btn = QPushButton("Réinitialiser")
+        self.reset_btn.clicked.connect(self.controller.reinitialiser)
+        actions.addWidget(self.reset_btn)
+        bl.addLayout(actions)
+        self.progress = QProgressBar(); self.progress.setRange(0, 100)
+        bl.addWidget(self.progress)
+        self.status = QLabel("Prêt.")
+        self.status.setStyleSheet("color: gray;")
+        bl.addWidget(self.status)
+        outer.addWidget(self.bottom)
+
+        self._build(dom, self.body_layout)
+
+
+    def _build(self, dom, layout):
+        title = QLabel(dom.titre)
+        f = title.font(); f.setPointSize(15); f.setBold(True); title.setFont(f)
+        layout.addWidget(title)
+        subtitle = QLabel(f"{dom.scalaire}  ·  {dom.champ}")
+        subtitle.setStyleSheet("color: gray;")
+        layout.addWidget(subtitle)
+
+        self.groupe_validite = QGroupBox("Cadre scientifique et limites")
+        self.groupe_validite.setCheckable(True)
+        self.groupe_validite.setChecked(False)
+        validite_layout = QVBoxLayout(self.groupe_validite)
+        self.label_validite = QLabel()
+        self.label_validite.setWordWrap(True)
+        self.label_validite.setStyleSheet("color: #a7b6cc;")
+        validite_layout.addWidget(self.label_validite)
+        self.label_validite.hide()
+        self.groupe_validite.toggled.connect(
+            self.label_validite.setVisible)
+        layout.addWidget(self.groupe_validite)
+
+        if self.SUPPORTE_3D:
+            self._build_dimension_toggle(layout)
+
+
+
+
+
+        self.conteneur_2d = QWidget()
+        c2d = QVBoxLayout(self.conteneur_2d)
+        c2d.setContentsMargins(0, 0, 0, 0)
+
+
+        g = QGroupBox("Géométrie")
+        gl = QVBoxLayout(g)
+        self.cb_geom = QComboBox()
+        self.cb_geom.addItems(self._scenarios_affiches(dom))
+        self.cb_geom.currentTextChanged.connect(self._on_scenario_change)
+        gl.addWidget(self.cb_geom)
+        self.info_scenario_2d = QLabel()
+        self.info_scenario_2d.setWordWrap(True)
+        gl.addWidget(self.info_scenario_2d)
+
+
+
+
+        self.spin_taille = make_double_spin(1.0, 0.001, 1000.0, decimals=3, step=0.1)
+        self._row(gl, "Taille du domaine (m)", self.spin_taille)
+        self.spin_taille.valueChanged.connect(self._scene_2d_modifiee)
+        c2d.addWidget(g)
+
+
+        self._build_domain_params(c2d, dom)
+
+
+        self._build_sources_obstacles(c2d, dom)
+
+
+        self._build_walls(c2d, dom)
+
+
+
+
+        s = QGroupBox("Avancé — solveur numérique")
+        s.setCheckable(True)
+        s.setChecked(False)
+        sl = QVBoxLayout(s)
+        contenu_solveur = QWidget()
+        cl = QVBoxLayout(contenu_solveur)
+        cl.setContentsMargins(0, 0, 0, 0)
+        info_solveur = QLabel(
+            "Par défaut : FEM (direct) — précis, rapide, et seul à prendre en "
+            "compte matériaux et parois convection/rayonnement/flux. Les "
+            "solveurs itératifs (Jacobi, Gauss-Seidel, SOR) sont proposés à "
+            "titre pédagogique.")
+        info_solveur.setWordWrap(True)
+        info_solveur.setStyleSheet("color: gray;")
+        cl.addWidget(info_solveur)
+        r = QHBoxLayout()
+        r.addWidget(QLabel("Méthode"))
+        r.addWidget(self.cb_meth)
+        cl.addLayout(r)
+        cl.addWidget(QLabel("Oméga (SOR)"))
+        cl.addWidget(self.spin_omega)
+        opt_btn = QPushButton("Oméga optimal")
+        opt_btn.clicked.connect(self._omega_opt)
+        cl.addWidget(opt_btn)
+        self._row(cl, "Itér. max", self.spin_maxiter)
+        self._row(cl, "Tolérance", self.edit_tol)
+        self._row(cl, "Raffinement (FEM)", self.spin_refine)
+        sl.addWidget(contenu_solveur)
+        contenu_solveur.setVisible(False)
+        s.toggled.connect(contenu_solveur.setVisible)
+        c2d.addWidget(s)
+
+        layout.addWidget(self.conteneur_2d)
+
+        if self.SUPPORTE_3D:
+            self._build_conteneur_3d(layout)
+
+
+        vz = QGroupBox("Visualisation")
+        vzl = QVBoxLayout(vz)
+        if self.SUPPORTE_3D:
+            self.label_scalaire_3d = QLabel("Grandeur affichée")
+            self.cb_scalaire_3d = QComboBox()
+            self.cb_scalaire_3d.addItems(list(fem3d_render.SCALAIRES_3D))
+            self.cb_scalaire_3d.currentTextChanged.connect(
+                self._on_scalaire_3d_change)
+            vzl.addWidget(self.label_scalaire_3d)
+            vzl.addWidget(self.cb_scalaire_3d)
+            self.label_scalaire_3d.hide()
+            self.cb_scalaire_3d.hide()
+        vzl.addWidget(QLabel("Mode de rendu"))
+        vzl.addWidget(self.cb_viz)
+        self.cb_viz.currentTextChanged.connect(
+            lambda kind: self.controller.refresh_plot(kind))
+        layout.addWidget(vz)
+
+        layout.addStretch(1)
+
+        if hasattr(self, "cb_regime"):
+            self.cb_regime.currentTextChanged.connect(self._maj_validite)
+        self._maj_validite()
+
+
         self._charger_parois()
+        self._dernier_scenario_2d = self.cb_geom.currentText()
+        self._maj_disponibilite_edition_2d()
 
-    # ----------------------------------------- hooks pour les sous-classes
-    def _build_domain_params(self, host, dom):
-        """Section Parametres. Surcharger pour ajouter les champs specifiques."""
-        p = ttk.LabelFrame(host, text="Parametres", padding=6)
-        p.pack(fill="x", pady=3)
-        self._row(p, "Resolution N", self.var_N)
 
-    def _build_sources_obstacles(self, host, dom):
-        """Section Sources/Obstacles. Surcharger selon le domaine."""
+    def _build_dimension_toggle(self, layout):
+        d = QGroupBox("Dimension")
+        dl = QVBoxLayout(d)
+        info = QLabel("3D : scénarios sur un vrai maillage tétraédrique "
+                       "(éléments finis). « Scène libre » permet de créer "
+                       "l'environnement ; les scénarios prédéfinis sont verrouillés.")
+        info.setWordWrap(True)
+        info.setStyleSheet("color: gray;")
+        dl.addWidget(info)
+        self.cb_regime_3d = QComboBox()
+        self.cb_regime_3d.addItems(["Stationnaire", "Transitoire"])
+        self.cb_regime_3d.currentTextChanged.connect(self._maj_dynamique_3d)
+        if self.controller.domaine.nom == "Thermique":
+            self._row(dl, "Régime", self.cb_regime_3d)
+        else:
+            self.cb_regime_3d.hide()
+        self.cb_dimension = QComboBox()
+        self.cb_dimension.addItems(["2D", "3D"])
+        self.cb_dimension.currentTextChanged.connect(self._on_dimension_change)
+        dl.addWidget(self.cb_dimension)
+        layout.addWidget(d)
 
-    def _build_walls(self, host, dom):
-        """Section Parois. Surcharger selon le domaine."""
+    def _build_conteneur_3d(self, layout):
+        self.conteneur_3d = QWidget()
+        c3 = QVBoxLayout(self.conteneur_3d)
+        c3.setContentsMargins(0, 0, 0, 0)
+        g3 = QGroupBox("Scénario 3D")
+        g3l = QVBoxLayout(g3)
+        self.cb_geom_3d = QComboBox()
+        self.cb_geom_3d.addItems(list(self.SCENARIOS_3D.keys()))
+        self.cb_geom_3d.currentTextChanged.connect(
+            self._maj_disponibilite_edition_3d)
+        self.cb_geom_3d.currentTextChanged.connect(self._apercu_scene_3d)
+        self.cb_geom_3d.currentTextChanged.connect(self._maj_validite)
+        g3l.addWidget(self.cb_geom_3d)
+        self.spin_taille_3d = make_double_spin(
+            1.0, 0.001, 1000.0, decimals=3, step=0.1)
+        self._row(g3l, "Taille du domaine (m)", self.spin_taille_3d)
+        self.spin_taille_3d.valueChanged.connect(
+            self._taille_scenario_3d_changee)
+        self.spin_N_3d = make_int_spin(16, minv=4, maxv=40)
+        self._row(g3l, "Résolution (par arête)", self.spin_N_3d)
+        c3.addWidget(g3)
+        self._build_dynamique_3d(c3)
+        self.cb_geom_3d.currentTextChanged.connect(self._maj_dynamique_3d)
+        self.editeur_scene_3d = SceneEditorPanel(
+            self.controller.domaine.nom,
+            callback_scene=self._scene_3d_modifiee)
+        c3.addWidget(self.editeur_scene_3d)
+        self.info_scenario_3d_verrouille = QLabel(
+            "Scénario prédéfini : sa géométrie est définie par le modèle. "
+            "Choisissez « Scène libre » pour ajouter, déplacer ou "
+            "redimensionner des objets.")
+        self.info_scenario_3d_verrouille.setWordWrap(True)
+        self.info_scenario_3d_verrouille.setStyleSheet("color: #d97706;")
+        c3.addWidget(self.info_scenario_3d_verrouille)
+        self._maj_disponibilite_edition_3d()
+        layout.addWidget(self.conteneur_3d)
+        self.conteneur_3d.hide()
 
-    def _on_scenario_change(self, event=None):
-        self._charger_parois(event)
+    def _build_dynamique_3d(self, layout):
+        d = QGroupBox("Dynamique (transitoire / variable)")
+        self.groupe_dynamique_3d = d
+        dl = QVBoxLayout(d)
+        info = QLabel("Paramètres temporels du scénario sélectionné. "
+                       "Le pas de temps interne vaut durée/(images×5), "
+                       "schéma implicite stable.")
+        info.setWordWrap(True)
+        info.setStyleSheet("color: gray;")
+        dl.addWidget(info)
+        self.spin_T_initiale_3d = make_double_spin(0.0)
+        self.spin_duree_3d = make_double_spin(3.0, 0.001, 1.0e6,
+                                              decimals=3, step=0.5)
+        self.spin_n_images_3d = make_int_spin(30, minv=2, maxv=500)
+        self.cb_forme_temporelle_3d = QComboBox()
+        self.cb_forme_temporelle_3d.addItems(NOMS_FORMES)
+        self.spin_frequence_3d = make_double_spin(0.5, 0.001, 1.0e6,
+                                                  decimals=3, step=0.1)
+        self._lignes_dynamique_3d = {}
+        for nom_param, libelle, widget in (
+                ("T_initiale", "T initiale (°C)", self.spin_T_initiale_3d),
+                ("duree", "Durée simulée (s)", self.spin_duree_3d),
+                ("n_images", "Images", self.spin_n_images_3d),
+                ("forme", "Forme", self.cb_forme_temporelle_3d),
+                ("frequence", "Fréquence (Hz)", self.spin_frequence_3d)):
+            ligne = QWidget()
+            rl = QHBoxLayout(ligne)
+            rl.setContentsMargins(0, 0, 0, 0)
+            lab = QLabel(libelle)
+            lab.setMinimumWidth(90)
+            rl.addWidget(lab)
+            widget.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                 QSizePolicy.Policy.Fixed)
+            rl.addWidget(widget)
+            dl.addWidget(ligne)
+            self._lignes_dynamique_3d[nom_param] = ligne
+        layout.addWidget(d)
+        self._maj_dynamique_3d()
 
-    def _charger_parois(self, event=None):
-        """Charge les parois recommandees du scenario courant. Surcharger."""
+    def _maj_dynamique_3d(self, _nom=None):
+        if not hasattr(self, "groupe_dynamique_3d"):
+            return
+        if self.controller.domaine.nom == "Thermique":
+            transitoire = self.cb_regime_3d.currentText() == "Transitoire"
+            for nom, ligne in self._lignes_dynamique_3d.items():
+                ligne.setVisible(
+                    transitoire and nom in ("T_initiale", "duree", "n_images"))
+            self.groupe_dynamique_3d.setVisible(True)
+            if hasattr(self, "label_validite"):
+                self._maj_validite()
+            return
+        acceptes = {nom: self._scenario_3d_accepte(nom)
+                    for nom in self._lignes_dynamique_3d}
+        for nom, ligne in self._lignes_dynamique_3d.items():
+            ligne.setVisible(acceptes[nom])
+        self.groupe_dynamique_3d.setVisible(any(acceptes.values()))
 
-    # ------------------------------------------------------- helpers communs
-    def _row(self, parent, label, var):
-        r = ttk.Frame(parent); r.pack(fill="x", pady=1)
-        ttk.Label(r, text=label, width=12).pack(side="left")
-        ttk.Entry(r, textvariable=var, width=10).pack(side="right")
+    def _scene_3d_modifiee(self, scene, index_selectionne=-1, modifie=False):
+        if hasattr(self, "spin_taille_3d"):
+            self.spin_taille_3d.blockSignals(True)
+            self.spin_taille_3d.setValue(float(np.max(scene.dimensions)))
+            self.spin_taille_3d.blockSignals(False)
+        if hasattr(self, "cb_dimension") \
+                and self.cb_dimension.currentText() == "3D":
+            if modifie:
+                self.controller._generation += 1
+                self.controller.result = None
+                self.progress.setValue(0)
+                self.status.setText("Scène modifiée — relancez la simulation.")
+            self.controller.plot.afficher_scene_3d(
+                scene, index_selectionne,
+                self.editeur_scene_3d.selectionner_depuis_vue,
+                self.editeur_scene_3d.appliquer_transformation_vue,
+                self.editeur_scene_3d.mode_transformation)
+
+    def _apercu_scene_3d(self, *_args):
+        if hasattr(self, "editeur_scene_3d"):
+            environnement = self._est_scene_libre()
+            self.spin_taille_3d.setEnabled(not environnement)
+            if not environnement:
+                self.controller.plot.reset()
+                return
+            self._scene_3d_modifiee(
+                self.editeur_scene_3d.scene,
+                self.editeur_scene_3d.index_selectionne,
+                modifie=False)
+
+    def _taille_scenario_3d_changee(self, valeur):
+        if not hasattr(self, "editeur_scene_3d") or not self._est_scene_libre():
+            return
+        editeur = self.editeur_scene_3d
+        editeur._chargement_formulaire = True
+        try:
+            for spin in (editeur.spin_lx, editeur.spin_ly, editeur.spin_lz):
+                spin.setValue(float(valeur))
+            editeur.scene.taille_m = float(valeur)
+            editeur.scene.boite_domaine = (
+                (0.0, 0.0, 0.0), (float(valeur),) * 3)
+        finally:
+            editeur._chargement_formulaire = False
+        self._apercu_scene_3d()
+
+
+
+
+
+
+
+
+
+    def _on_dimension_change(self, texte):
+        est_3d = (texte == "3D")
+        self.conteneur_2d.setVisible(not est_3d)
+        self.conteneur_3d.setVisible(est_3d)
+        vue_courante = self.cb_viz.currentText()
+        self.cb_viz.blockSignals(True)
+        self.cb_viz.clear()
+        nouvelles_vues = (list(fem3d_render.MODES_RENDU)
+                           if est_3d else list(viz.KINDS))
+        self.cb_viz.addItems(nouvelles_vues)
+        appliquer_defaut_magnetique = (
+            est_3d and self.controller.domaine.nom == "Magnetostatique"
+            and not self._defaut_magnetique_3d_applique)
+        if appliquer_defaut_magnetique:
+            self.cb_viz.setCurrentText("Lignes de champ")
+        elif vue_courante in nouvelles_vues:
+            self.cb_viz.setCurrentText(vue_courante)
+        self.cb_viz.blockSignals(False)
+        self.label_scalaire_3d.setVisible(est_3d)
+        self.cb_scalaire_3d.setVisible(est_3d)
+        if appliquer_defaut_magnetique:
+            self.cb_scalaire_3d.setCurrentText("Intensité du champ")
+            self.controller.plot.configurer_defaut_magnetique_3d()
+            self._defaut_magnetique_3d_applique = True
+        if est_3d:
+            self._apercu_scene_3d()
+        else:
+            self.controller.plot.btn_2d.setEnabled(True)
+            self._maj_disponibilite_edition_2d()
+            self._scene_2d_modifiee()
+        self._maj_validite()
+
+    def _on_scalaire_3d_change(self, selection):
+        plot = getattr(self.controller, "plot", None)
+        if plot is None:
+            return
+        plot.set_scalaire_3d(selection)
+        self.controller.refresh_plot(self.cb_viz.currentText())
+
+    def _scenario_3d_accepte(self, nom_parametre):
+        if not hasattr(self, "cb_geom_3d"):
+            return False
+        builder = self.SCENARIOS_3D.get(self.cb_geom_3d.currentText())
+        if builder is None:
+            return False
+        try:
+            parametres = inspect.signature(builder).parameters
+        except (TypeError, ValueError):
+            return False
+        return (nom_parametre in parametres
+                or any(p.kind == inspect.Parameter.VAR_KEYWORD
+                       for p in parametres.values()))
+
+    def _est_scene_libre(self):
+        return (hasattr(self, "cb_geom_3d")
+                and self.cb_geom_3d.currentText().startswith(
+                    _PREFIXE_SCENE_LIBRE))
+
+    def _maj_disponibilite_edition_3d(self, _nom=None):
+        libre = self._est_scene_libre()
+        if hasattr(self, "editeur_scene_3d"):
+            self.editeur_scene_3d.setVisible(libre)
+        if hasattr(self, "info_scenario_3d_verrouille"):
+            self.info_scenario_3d_verrouille.setVisible(not libre)
+
+
+    def _scenarios_affiches(self, dom):
+        essentiels = getattr(dom, "scenarios_essentiels", ()) or ()
+        if essentiels:
+            resultat = ([NOM_SCENE_LIBRE_2D]
+                        if NOM_SCENE_LIBRE_2D in dom.scenarios else [])
+            resultat.extend(
+                n for n in essentiels
+                if n in dom.scenarios and n not in resultat)
+            return resultat
+        return list(dom.scenarios)
+
+    def _build_domain_params(self, layout, dom):
+        p = QGroupBox("Paramètres")
+        pl = QVBoxLayout(p)
+        self._row(pl, "Résolution N", self.spin_N)
+        layout.addWidget(p)
+
+    def _build_sources_obstacles(self, layout, dom):
+        pass
+
+    def _build_walls(self, layout, dom):
+        pass
+
+    def _on_scenario_change(self, _text=None):
+        nouveau = self.cb_geom.currentText()
+        if self._dernier_scenario_2d == NOM_SCENE_LIBRE_2D:
+            self._parois_scene_libre_2d = copy.deepcopy(self._walls())
+        self._chargement_scene_2d = True
+        try:
+            if (nouveau == NOM_SCENE_LIBRE_2D
+                    and self._parois_scene_libre_2d is not None):
+                self._appliquer_parois_2d(self._parois_scene_libre_2d)
+            else:
+                self._charger_parois()
+        finally:
+            self._chargement_scene_2d = False
+        self._dernier_scenario_2d = nouveau
+        self._maj_disponibilite_edition_2d()
+        self._maj_validite()
+        self._scene_2d_modifiee()
+
+    def _appliquer_parois_2d(self, parois):
+        for cote in COTES:
+            specification = parois.get(cote, ("neumann",))
+            self.wall_kind[cote].setCurrentText(specification[0])
+            self.wall_p1[cote].setValue(
+                float(specification[1]) if len(specification) > 1 else 0.0)
+            if hasattr(self, "wall_p2") and cote in self.wall_p2:
+                self.wall_p2[cote].setValue(
+                    float(specification[2]) if len(specification) > 2 else 0.0)
+            self._maj_paroi(cote)
+
+    def _est_scene_libre_2d(self):
+        return (hasattr(self, "cb_geom")
+                and self.cb_geom.currentText() == NOM_SCENE_LIBRE_2D)
+
+    def _maj_disponibilite_edition_2d(self):
+        libre = self._est_scene_libre_2d()
+        groupes = list(getattr(self, "groupes_edition_2d", []))
+        groupe_unique = getattr(self, "groupe_edition_2d", None)
+        if groupe_unique is not None:
+            groupes.append(groupe_unique)
+        groupe_parois = getattr(self, "groupe_parois_2d", None)
+        if groupe_parois is not None:
+            groupes.append(groupe_parois)
+        groupe_solaire = getattr(self, "groupe_solaire_2d", None)
+        if groupe_solaire is not None:
+            groupes.append(groupe_solaire)
+        for groupe in groupes:
+            groupe.setVisible(libre)
+        for bouton in self._boutons_placement_2d:
+            if not libre and bouton.isChecked():
+                bouton.setChecked(False)
+        if libre:
+            self.info_scenario_2d.setText(
+                "Scène libre : ajoutez vos objets, sources et conditions "
+                "aux limites, puis placez-les au clic dans l’aperçu.")
+            self.info_scenario_2d.setStyleSheet("color: #22c55e;")
+        else:
+            self.info_scenario_2d.setText(
+                "Géométrie prédéfinie verrouillée. Choisissez « Scène libre » "
+                "pour construire votre propre environnement 2D.")
+            self.info_scenario_2d.setStyleSheet("color: #f59e0b;")
+
+    def _scene_2d_modifiee(self, *_args):
+        if self._chargement_scene_2d:
+            return
+        plot = getattr(self.controller, "plot", None)
+        if plot is None or (hasattr(self, "cb_dimension")
+                            and self.cb_dimension.currentText() != "2D"):
+            return
+        try:
+            p = self.read_params()
+            champ = geo.build(
+                self.controller.domaine.scenarios, p["geom"],
+                min(160, max(40, p["N"])), p["v"], p["walls"],
+                p["obstacles"], q=p.get("q"),
+                kappa_fond=p.get("kappa_fond", 1.0),
+                taille_domaine=p.get("taille_domaine", 1.0),
+                rho_cp_fond=p.get("rho_cp_fond", 1.0))
+        except (KeyError, TypeError, ValueError):
+            return
+        self.controller._generation += 1
+        self.controller.result = None
+        self.progress.setValue(0)
+        self.status.setText("Environnement modifié — relancez la simulation.")
+        plot.afficher_scene_2d(champ, p["geom"])
+
+    def _maj_validite(self, *_args):
+        dimension = (self.cb_dimension.currentText()
+                     if self.SUPPORTE_3D and hasattr(self, "cb_dimension")
+                     else "2D")
+        if (dimension == "3D" and hasattr(self, "cb_regime_3d")
+                and self.controller.domaine.nom == "Thermique"):
+            regime = self.cb_regime_3d.currentText()
+        else:
+            regime = (self.cb_regime.currentText()
+                      if hasattr(self, "cb_regime") else "Stationnaire")
+        scenario = (self.cb_geom_3d.currentText()
+                    if dimension == "3D" and hasattr(self, "cb_geom_3d")
+                    else self.cb_geom.currentText()
+                    if hasattr(self, "cb_geom") else "")
+        commun = [
+            f"Modèle : {dimension}, régime {regime.lower()}, scénario « {scenario} ».",
+            "Les propriétés de matériaux sont des ordres de grandeur pédagogiques, "
+            "pas des données certifiées de conception.",
+        ]
+        if self.controller.domaine.nom == "Electrostatique":
+            commun += [
+                "Approximation électrostatique/quasi-statique : induction et "
+                "propagation électromagnétique non modélisées.",
+                "Les métaux placés comme matériaux sont approchés par une très "
+                "forte permittivité ; une électrode imposée représente mieux un "
+                "conducteur idéal.",
+                "Une paroi de Neumann impose un flux normal nul : ce n'est pas "
+                "une frontière ouverte à l'infini.",
+            ]
+        elif self.controller.domaine.nom == "Magnetostatique":
+            if dimension == "3D":
+                commun += [
+                    "Biot–Savart dans l'air/le vide pour des fils minces : valeurs "
+                    "en teslas, sans noyau magnétique ni courant induit.",
+                ]
+            else:
+                commun += [
+                    "Coupe 2D supposée infinie dans la direction hors plan ; "
+                    "A_z et B sont affichés en unités relatives.",
+                    "Matériaux magnétiques linéaires : saturation, hystérésis et "
+                    "courants de Foucault non modélisés.",
+                ]
+        else:
+            commun += [
+                "Conduction thermique uniquement dans le domaine ; convection et "
+                "rayonnement n'agissent que sur les parois configurées.",
+                "Le rayonnement est linéarisé autour de la température ambiante : "
+                "prudence pour les écarts de température très élevés.",
+            ]
+            if regime == "Transitoire":
+                commun.append(
+                    "Le transitoire utilise ρ·cp et un schéma implicite ; le pas "
+                    "de temps influence la précision, même si le schéma reste stable.")
+        self.label_validite.setText("\n• " + "\n• ".join(commun))
+
+    def _charger_parois(self):
+        pass
+
+
+    def _bouton_placement_2d(self, layout, spin_x, spin_y, ajouter_fn):
+        btn = QPushButton("Placer au clic sur la carte")
+        btn.setCheckable(True)
+
+        def _basculer(actif):
+            if actif:
+                def cb(x, y):
+                    spin_x.setValue(round(x, 3))
+                    spin_y.setValue(round(y, 3))
+                    ajouter_fn()
+                self.controller.plot.activer_placement_2d(cb)
+                btn.setText("Placement actif — cliquez sur la carte")
+            else:
+                self.controller.plot.activer_placement_2d(None)
+                btn.setText("Placer au clic sur la carte")
+
+        btn.toggled.connect(_basculer)
+        layout.addWidget(btn)
+        self._boutons_placement_2d.append(btn)
+        return btn
+
+    def _row(self, layout, label, widget):
+        r = QHBoxLayout()
+        lab = QLabel(label)
+        lab.setMinimumWidth(90)
+        r.addWidget(lab)
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        r.addWidget(widget)
+        layout.addLayout(r)
 
     def _omega_opt(self):
-        self.var_omega.set(round(omega_optimal(self.var_N.get()), 3))
+        self.spin_omega.setValue(round(omega_optimal(self.spin_N.value()), 3))
 
-    # ----------------------------------------- interface pour DomainPage
+
+
+
+
+    def _maj_paroi(self, c):
+        kind = self.wall_kind[c].currentText()
+        self.wall_p1[c].setEnabled(kind == "dirichlet")
+        self._scene_2d_modifiee()
+
+    def _walls(self):
+        d = {}
+        for c in COTES:
+            k = self.wall_kind[c].currentText()
+            d[c] = (("dirichlet", float(self.wall_p1[c].value()))
+                    if k == "dirichlet" else ("neumann",))
+        return d
+
+
+    def _build_environnement(self, layout):
+        from fieldlab.environments import NOMS_ENVIRONNEMENTS
+        e = QGroupBox("Environnement")
+        el = QVBoxLayout(e)
+        info = QLabel("Milieu ambiant qui remplit le domaine (hors obstacles/"
+                       "matériaux placés explicitement) : modifie la "
+                       "conductivité/permittivité/perméabilité de fond.")
+        info.setWordWrap(True)
+        info.setStyleSheet("color: gray;")
+        el.addWidget(info)
+        self.cb_environnement = QComboBox()
+        self.cb_environnement.addItems(["(aucun, vide normalise)"] + NOMS_ENVIRONNEMENTS)
+        self.cb_environnement.currentTextChanged.connect(self._appliquer_environnement)
+        self.cb_environnement.currentTextChanged.connect(
+            self._scene_2d_modifiee)
+        el.addWidget(self.cb_environnement)
+        layout.addWidget(e)
+
+    def _appliquer_environnement(self, _nom):
+        pass
+
+    def _kappa_fond(self):
+        cb = getattr(self, "cb_environnement", None)
+        if cb is None or cb.currentText().startswith("(aucun"):
+            return 1.0
+        from fieldlab.environments import ENVIRONNEMENTS
+        from fieldlab.materials import MATERIAUX, kappa_pour_domaine
+        env = ENVIRONNEMENTS[cb.currentText()]
+        return kappa_pour_domaine(MATERIAUX[env.materiau_fond], self.controller.domaine.nom)
+
+    def _rho_cp_fond(self):
+        cb = getattr(self, "cb_environnement", None)
+        if cb is None or cb.currentText().startswith("(aucun"):
+            return 1.0
+        from fieldlab.environments import ENVIRONNEMENTS
+        from fieldlab.materials import MATERIAUX
+        env = ENVIRONNEMENTS[cb.currentText()]
+        return MATERIAUX[env.materiau_fond].rho_cp
+
+
+    def _build_regime_variable(self, layout):
+        r = QGroupBox("Régime")
+        rl = QVBoxLayout(r)
+        info = QLabel("Stationnaire : amplitude constante.\n"
+                       "Variable : amplitude animée dans le temps (lecteur "
+                       "temporel), par résolutions stationnaires successives "
+                       "indépendantes (approximation quasi-statique).")
+        info.setWordWrap(True)
+        info.setStyleSheet("color: gray;")
+        rl.addWidget(info)
+        self.cb_regime = QComboBox()
+        self.cb_regime.addItems(["Stationnaire", "Variable"])
+        rl.addWidget(self.cb_regime)
+        self.cb_forme_temporelle = QComboBox()
+        self.cb_forme_temporelle.addItems(NOMS_FORMES)
+        self._row(rl, "Forme", self.cb_forme_temporelle)
+        self.spin_frequence = make_double_spin(1.0, 0.001, 1.0e6, decimals=3, step=0.1)
+        self._row(rl, "Fréquence (Hz)", self.spin_frequence)
+        self.spin_duree_var = make_double_spin(2.0, 0.001, 1.0e6, decimals=3, step=0.5)
+        self._row(rl, "Durée simulée (s)", self.spin_duree_var)
+        self.spin_n_images_var = make_int_spin(60, minv=2, maxv=500)
+        self._row(rl, "Images", self.spin_n_images_var)
+        layout.addWidget(r)
+
+    def _contribute_regime_variable(self, d):
+        d["regime"] = self.cb_regime.currentText()
+        d["forme_temporelle"] = self.cb_forme_temporelle.currentText()
+        d["frequence"] = float(self.spin_frequence.value())
+        d["duree"] = float(self.spin_duree_var.value())
+        d["n_images"] = int(self.spin_n_images_var.value())
+
+
     def _vider_obstacles(self):
-        """Vide la liste de sources/obstacles (surcharger si besoin)."""
+        pass
 
     def contribute_params(self, d):
-        """Sous-classes ajoutent leurs parametres propres dans d."""
+        pass
 
     def read_params(self):
         d = {
-            "geom":     self.var_geom.get(),
-            "N":        int(self.var_N.get()),
-            "method":   self.var_meth.get(),
-            "omega":    float(self.var_omega.get()),
-            "max_iter": int(self.var_maxiter.get()),
-            "tol":      float(self.var_tol.get()),
-            "viz":      self.var_viz.get(),
+            "geom":     self.cb_geom.currentText(),
+            "N":        int(self.spin_N.value()),
+            "method":   self.cb_meth.currentText(),
+            "omega":    float(self.spin_omega.value()),
+            "max_iter": int(self.spin_maxiter.value()),
+            "tol":      float(self.edit_tol.text()),
+            "viz":      self.cb_viz.currentText(),
+            "refine":   int(self.spin_refine.value()),
+            "kappa_fond": self._kappa_fond(),
+            "taille_domaine": float(self.spin_taille.value()),
         }
+        d["dimension"] = "2D"
+        if self.SUPPORTE_3D and self.cb_dimension.currentText() == "3D":
+            d["dimension"] = "3D"
+            d["geom_3d"] = self.cb_geom_3d.currentText()
+            d["N_3d"] = int(self.spin_N_3d.value())
+            d["scalaire_3d"] = self.cb_scalaire_3d.currentText()
+            d["regime_3d"] = self.cb_regime_3d.currentText()
+            if self._est_scene_libre():
+                d["scene_3d"] = self.editeur_scene_3d.scene
+
+
+
+            d["T_initiale_3d"] = float(self.spin_T_initiale_3d.value())
+            d["duree_3d"] = float(self.spin_duree_3d.value())
+            d["n_images_3d"] = int(self.spin_n_images_3d.value())
+            d["forme_temporelle_3d"] = \
+                self.cb_forme_temporelle_3d.currentText()
+            d["frequence_3d"] = float(self.spin_frequence_3d.value())
+            if self._scenario_3d_accepte("taille_m"):
+                d["taille_m_3d"] = float(self.spin_taille_3d.value())
         self.contribute_params(d)
+        if d["dimension"] == "2D" and not self._est_scene_libre_2d():
+            d["obstacles"] = []
         return d
 
     def set_running(self, running):
-        self.run_btn.config(state="disabled" if running else "normal")
+        self.run_btn.setEnabled(not running)
+        self.cancel_btn.setEnabled(running)
+
+    def set_cancelling(self):
+        self.run_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(False)
+
+    def exporter_configuration(self):
+        types_simples = (QComboBox, QDoubleSpinBox, QSpinBox, QLineEdit, QCheckBox)
+
+        def valeur(widget):
+            if isinstance(widget, QComboBox):
+                return {"type": "combo", "value": widget.currentText()}
+            if isinstance(widget, (QDoubleSpinBox, QSpinBox)):
+                return {"type": "number", "value": widget.value()}
+            if isinstance(widget, QLineEdit):
+                return {"type": "text", "value": widget.text()}
+            return {"type": "check", "value": widget.isChecked()}
+
+        widgets = {}
+        for nom, objet in vars(self).items():
+            if isinstance(objet, types_simples):
+                widgets[nom] = valeur(objet)
+            elif isinstance(objet, dict):
+                sous = {str(cle): valeur(w) for cle, w in objet.items()
+                        if isinstance(w, types_simples)}
+                if sous:
+                    widgets[nom] = {"type": "mapping", "value": sous}
+        configuration = {"widgets": widgets}
+        scene_2d = {}
+        for nom in ("obstacles", "obstacles_th", "sources", "noyaux"):
+            valeur_scene = getattr(self, nom, None)
+            if isinstance(valeur_scene, list):
+                scene_2d[nom] = copy.deepcopy(valeur_scene)
+        if scene_2d:
+            configuration["scene_2d"] = scene_2d
+        if self._parois_scene_libre_2d is not None:
+            configuration.setdefault("scene_2d", {})["parois_libres"] = \
+                copy.deepcopy(self._parois_scene_libre_2d)
+        if hasattr(self, "editeur_scene_3d"):
+            configuration["scene_3d"] = \
+                self.editeur_scene_3d.scene.to_dict()
+        return configuration
+
+    def charger_configuration(self, configuration):
+        types_simples = (QComboBox, QDoubleSpinBox, QSpinBox, QLineEdit, QCheckBox)
+
+        def appliquer(widget, donnees):
+            if not isinstance(widget, types_simples) or not isinstance(donnees, dict):
+                return
+            ancienne = widget.blockSignals(True)
+            try:
+                valeur = donnees.get("value")
+                if isinstance(widget, QComboBox):
+                    index = widget.findText(str(valeur))
+                    if index >= 0:
+                        widget.setCurrentIndex(index)
+                elif isinstance(widget, QDoubleSpinBox):
+                    widget.setValue(float(valeur))
+                elif isinstance(widget, QSpinBox):
+                    widget.setValue(int(valeur))
+                elif isinstance(widget, QLineEdit):
+                    widget.setText(str(valeur))
+                else:
+                    widget.setChecked(bool(valeur))
+            finally:
+                widget.blockSignals(ancienne)
+
+        for nom, donnees in (configuration.get("widgets") or {}).items():
+            objet = getattr(self, nom, None)
+            if isinstance(donnees, dict) and donnees.get("type") == "mapping":
+                if isinstance(objet, dict):
+                    for cle, etat in donnees.get("value", {}).items():
+                        if cle in objet:
+                            appliquer(objet[cle], etat)
+            else:
+                appliquer(objet, donnees)
+        scene_2d = configuration.get("scene_2d") or {}
+        self._parois_scene_libre_2d = copy.deepcopy(
+            scene_2d.get("parois_libres"))
+        self._chargement_scene_2d = True
+        try:
+            for nom in ("obstacles", "obstacles_th", "sources", "noyaux"):
+                if nom in scene_2d and isinstance(getattr(self, nom, None), list):
+                    setattr(self, nom, copy.deepcopy(scene_2d[nom]))
+            if hasattr(self, "_rafraichir_obstacles"):
+                self._rafraichir_obstacles()
+            if hasattr(self, "_rafraichir_sources"):
+                self._rafraichir_sources()
+            if hasattr(self, "_rafraichir_noyaux"):
+                self._rafraichir_noyaux()
+        finally:
+            self._chargement_scene_2d = False
+        if configuration.get("scene_3d") and hasattr(self, "editeur_scene_3d"):
+            from fieldlab.fem3d.scene import Scene3D
+            editeur = self.editeur_scene_3d
+            editeur.scene = Scene3D.from_dict(configuration["scene_3d"])
+            editeur._charger_domaine()
+            editeur._rafraichir_liste(
+                0 if editeur.scene.items or editeur.scene.circuits else -1)
+            editeur._enregistrer_historique()
+        if self.SUPPORTE_3D and hasattr(self, "cb_dimension"):
+            self._on_dimension_change(self.cb_dimension.currentText())
+            self._maj_disponibilite_edition_3d()
+            self._maj_dynamique_3d()
+        self._dernier_scenario_2d = None
+        self._on_scenario_change()
+        self._maj_validite()

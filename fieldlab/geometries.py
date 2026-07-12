@@ -3,9 +3,15 @@ import numpy as np
 from fieldlab.grid import Field
 from fieldlab import obstacles as ob
 
+NOM_SCENE_LIBRE_2D = "Scène libre (environnement personnalisé)"
+
 
 def _vides(N):
     return (np.zeros((N, N)), np.zeros((N, N), bool), np.zeros((N, N), bool))
+
+
+def scene_libre(N, v):
+    return _vides(N)
 
 
 def condensateur_plan(N, v):
@@ -115,6 +121,7 @@ def electrodes_circulaires(N, v):
 
 
 GEOMETRIES = {
+    NOM_SCENE_LIBRE_2D: scene_libre,
     "Condensateur plan": condensateur_plan,
     "Condensateur + obstacle isolant": condensateur_obstacle_isolant,
     "Condensateur + obstacle conducteur": condensateur_obstacle_conducteur,
@@ -134,14 +141,12 @@ GEOMETRIES = {
 NOMS = list(GEOMETRIES)
 
 
-def build(scenarios, nom, N=120, val=10.0, walls=None, obstacles=None, q=None):
-    """Construit un Field a partir d'un scenario.
-
-    q : puissance volumique (thermique) ou courant additionnel (magneto) passe
-    en 3e argument aux builders qui l'acceptent. Les autres l'ignorent.
-    """
+def build(scenarios, nom, N=120, val=10.0, walls=None, obstacles=None, q=None,
+          kappa_fond=1.0, taille_domaine=1.0, rho_cp_fond=1.0):
     if nom not in scenarios:
         raise KeyError(f"Scenario inconnu : {nom!r}")
+    if N < 2:
+        raise ValueError(f"La resolution N doit etre au moins 2 (recu {N!r}).")
 
     fn = scenarios[nom]
     if q is not None:
@@ -154,23 +159,40 @@ def build(scenarios, nom, N=120, val=10.0, walls=None, obstacles=None, q=None):
 
     if len(out) == 4:
         V, fixed, solid, source = out
-    else:                                   # builders electrostatiques (3-uplet)
+    else:
         V, fixed, solid = out
         source = np.zeros_like(V)
 
-    ob.appliquer_obstacles(V, fixed, solid, source, obstacles)
+    kappa = np.full_like(V, float(kappa_fond))
+    rho_cp = np.full_like(V, float(rho_cp_fond))
+    ob.appliquer_obstacles(V, fixed, solid, source, obstacles, kappa=kappa,
+                           rho_cp=rho_cp)
+
+
+
+
+
+
 
     walls = walls or {c: ("neumann",) for c in ("haut", "bas", "gauche", "droite")}
     for cote, spec in walls.items():
         if spec[0] == "dirichlet":
-            if cote == "haut":   V[0, :] = spec[1];  fixed[0, :] = True
-            if cote == "bas":    V[-1, :] = spec[1]; fixed[-1, :] = True
+            if cote == "haut":   V[-1, :] = spec[1]; fixed[-1, :] = True
+            if cote == "bas":    V[0, :] = spec[1];  fixed[0, :] = True
             if cote == "gauche": V[:, 0] = spec[1];  fixed[:, 0] = True
             if cote == "droite": V[:, -1] = spec[1]; fixed[:, -1] = True
 
-    return Field(V, fixed, solid, h=1.0, walls=walls, source=source)
+
+
+
+
+
+
+
+    h = float(taille_domaine) / (N - 1)
+    return Field(V, fixed, solid, h=h, walls=walls, source=source, kappa=kappa,
+                 taille_domaine=float(taille_domaine), rho_cp=rho_cp)
 
 
 def walls_defaut(nom, val):
-    """Electrostatique : electrodes internes, bords libres par defaut."""
     return {c: ("neumann",) for c in ("haut", "bas", "gauche", "droite")}

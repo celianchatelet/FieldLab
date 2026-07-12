@@ -1,123 +1,141 @@
-"""Panneau de controle du domaine electrostatique.
+import numpy as np
 
-Parametres : Tension V (electrodes).
-Obstacles  : conducteur (Dirichlet a une tension V) / isolant (trou).
-Parois     : neumann (bord libre) ou dirichlet (tension imposee V).
-"""
-import tkinter as tk
-from tkinter import ttk
+from PySide6.QtWidgets import (
+    QComboBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget,
+    QPushButton, QVBoxLayout,
+)
 
 from fieldlab.obstacles import FORMES
-from fieldlab.app.panels.base import BasePanel, COTES
+from fieldlab.materials import MATERIAUX, NOMS_MATERIAUX, kappa_pour_domaine
+from fieldlab.app.panels.base import BasePanel, COTES, make_double_spin
+from fieldlab.fem3d.scenarios_par_domaine import SCENARIOS_3D_ELECTROSTATIQUE
 
-# Labels des parametres de paroi selon le type
-_PARAM_LABELS = {
-    "neumann":   ("", ""),
-    "dirichlet": ("V", ""),
-}
+_PREFIXE_MATERIAU = "materiau : "
+_TYPES_OBSTACLE = ["isolant", "conducteur"] + [
+    f"{_PREFIXE_MATERIAU}{nom}" for nom in NOMS_MATERIAUX]
 
 
 class ElectrostatiquePanel(BasePanel):
+    SUPPORTE_3D = True
+    SCENARIOS_3D = SCENARIOS_3D_ELECTROSTATIQUE
 
-    def __init__(self, master, page):
-        # Initialiser les attributs AVANT super().__init__ car _build() les utilise
+    def __init__(self, controller, parent=None):
         self.obstacles = []
-        self.wall_kind = {c: tk.StringVar(value="neumann") for c in COTES}
-        self.wall_p1   = {c: tk.DoubleVar(value=0.0)       for c in COTES}
-        self.wall_labA = {c: tk.StringVar(value="")         for c in COTES}
-        self._wall_entA = {}
-        self.var_v   = None   # cree dans _build_domain_params
-        self.ob_forme = tk.StringVar(value="disque")
-        self.ob_x     = tk.DoubleVar(value=0.5)
-        self.ob_y     = tk.DoubleVar(value=0.5)
-        self.ob_r     = tk.DoubleVar(value=0.1)
-        self.ob_type  = tk.StringVar(value="isolant")
-        self.ob_v     = tk.DoubleVar(value=5.0)
-        super().__init__(master, page)
+        self.wall_kind = {}
+        self.wall_p1 = {}
+        super().__init__(controller, parent)
 
-    # ------------------------------------------------------------------ build
-    def _build_domain_params(self, host, dom):
-        p = ttk.LabelFrame(host, text="Parametres", padding=6)
-        p.pack(fill="x", pady=3)
-        self.var_v = tk.DoubleVar(value=dom.defaut)
-        r = ttk.Frame(p); r.pack(fill="x", pady=1)
-        ttk.Label(r, text="Tension (V)").pack(side="left")
-        ttk.Entry(r, textvariable=self.var_v, width=8).pack(side="right")
-        self._row(p, "Resolution N", self.var_N)
 
-    def _build_sources_obstacles(self, host, dom):
-        o = ttk.LabelFrame(host, text="Obstacles", padding=6)
-        o.pack(fill="x", pady=3)
-        ttk.Label(o, foreground="gray", justify="left", wraplength=300,
-                  text="conducteur : Dirichlet a une tension V\n"
-                       "isolant    : trou (solid_mask)").pack(anchor="w", pady=(0, 4))
-        r1 = ttk.Frame(o); r1.pack(fill="x")
-        ttk.Combobox(r1, textvariable=self.ob_forme, values=list(FORMES),
-                     state="readonly", width=10).pack(side="left")
-        ttk.Combobox(r1, textvariable=self.ob_type,
-                     values=["isolant", "conducteur"],
-                     state="readonly", width=10).pack(side="left", padx=3)
-        r2 = ttk.Frame(o); r2.pack(fill="x", pady=2)
-        for lab, var in (("x", self.ob_x), ("y", self.ob_y),
-                         ("taille", self.ob_r), ("V", self.ob_v)):
-            ttk.Label(r2, text=lab).pack(side="left")
-            ttk.Entry(r2, textvariable=var, width=5).pack(side="left", padx=2)
-        r3 = ttk.Frame(o); r3.pack(fill="x")
-        ttk.Button(r3, text="Ajouter", command=self._ajouter).pack(side="left")
-        ttk.Button(r3, text="Vider", command=self._vider_obstacles).pack(side="left", padx=3)
-        self.liste = tk.Listbox(o, height=4)
-        self.liste.pack(fill="x", pady=(3, 0))
+    def _build_domain_params(self, layout, dom):
+        p = QGroupBox("Paramètres")
+        pl = QVBoxLayout(p)
+        self.spin_v = make_double_spin(dom.defaut)
+        self._row(pl, "Tension (V)", self.spin_v)
+        self._row(pl, "Résolution N", self.spin_N)
+        layout.addWidget(p)
+        self._build_environnement(layout)
+        self._build_regime_variable(layout)
 
-    def _build_walls(self, host, dom):
-        w = ttk.LabelFrame(host, text="Parois du domaine", padding=6)
-        w.pack(fill="x", pady=3)
-        ttk.Label(w, foreground="gray", justify="left", wraplength=300,
-                  text="neumann : bord libre  ·  dirichlet : tension imposee (V)").pack(
-            anchor="w", pady=(0, 4))
-        grid = ttk.Frame(w); grid.pack(fill="x")
+    def _build_sources_obstacles(self, layout, dom):
+        o = QGroupBox("Obstacles")
+        self.groupe_edition_2d = o
+        ol = QVBoxLayout(o)
+        info = QLabel("conducteur : tension V imposée  ·  isolant : bloque le champ\n"
+                       "matériau : permittivité réelle (solveur FEM)")
+        info.setWordWrap(True)
+        info.setStyleSheet("color: gray;")
+        ol.addWidget(info)
+
+        r1 = QHBoxLayout()
+        self.cb_forme = QComboBox(); self.cb_forme.addItems(list(FORMES))
+        self.cb_type = QComboBox(); self.cb_type.addItems(_TYPES_OBSTACLE)
+        r1.addWidget(self.cb_forme)
+        r1.addWidget(self.cb_type)
+        ol.addLayout(r1)
+
+        r2 = QHBoxLayout()
+        self.spin_ob_x = make_double_spin(0.5, 0.0, 1.0, decimals=3, step=0.05)
+        self.spin_ob_y = make_double_spin(0.5, 0.0, 1.0, decimals=3, step=0.05)
+        self.spin_ob_r = make_double_spin(0.1, 0.0, 1.0, decimals=3, step=0.01)
+        self.spin_ob_v = make_double_spin(5.0)
+        for lab, w in (("x", self.spin_ob_x), ("y", self.spin_ob_y),
+                       ("taille", self.spin_ob_r), ("V", self.spin_ob_v)):
+            r2.addWidget(QLabel(lab))
+            r2.addWidget(w)
+        ol.addLayout(r2)
+
+        r3 = QHBoxLayout()
+        add_btn = QPushButton("Ajouter"); add_btn.clicked.connect(self._ajouter)
+        update_btn = QPushButton("Mettre à jour")
+        update_btn.clicked.connect(self._mettre_a_jour_obstacle)
+        duplicate_btn = QPushButton("Dupliquer")
+        duplicate_btn.clicked.connect(self._dupliquer_obstacle)
+        delete_btn = QPushButton("Supprimer")
+        delete_btn.clicked.connect(self._supprimer_obstacle)
+        clr_btn = QPushButton("Vider"); clr_btn.clicked.connect(self._vider_obstacles)
+        for bouton in (add_btn, update_btn, duplicate_btn, delete_btn, clr_btn):
+            r3.addWidget(bouton)
+        ol.addLayout(r3)
+
+        self._bouton_placement_2d(ol, self.spin_ob_x, self.spin_ob_y, self._ajouter)
+
+        self.liste = QListWidget(); self.liste.setMaximumHeight(90)
+        self.liste.currentRowChanged.connect(self._charger_obstacle)
+        ol.addWidget(self.liste)
+        layout.addWidget(o)
+
+    def _build_walls(self, layout, dom):
+        w = QGroupBox("Parois du domaine")
+        self.groupe_parois_2d = w
+        wl = QVBoxLayout(w)
+        info = QLabel("neumann : bord libre  ·  dirichlet : tension imposée (V)")
+        info.setWordWrap(True)
+        info.setStyleSheet("color: gray;")
+        wl.addWidget(info)
+
+        grid = QGridLayout()
         for col, txt in ((0, "Cote"), (1, "Condition"), (2, "V")):
-            ttk.Label(grid, text=txt, font=("", 8, "bold")).grid(
-                row=0, column=col, sticky="w", padx=(0, 4), pady=(0, 2))
+            lab = QLabel(txt); f = lab.font(); f.setBold(True); lab.setFont(f)
+            grid.addWidget(lab, 0, col)
         for i, c in enumerate(COTES, start=1):
-            ttk.Label(grid, text=c.capitalize()).grid(row=i, column=0, sticky="w", padx=(0, 4))
-            cb = ttk.Combobox(grid, textvariable=self.wall_kind[c],
-                              values=["neumann", "dirichlet"],
-                              state="readonly", width=9)
-            cb.grid(row=i, column=1, padx=(0, 8), pady=1)
-            cb.bind("<<ComboboxSelected>>", lambda e, k=c: self._maj_paroi(k))
-            ttk.Label(grid, textvariable=self.wall_labA[c], width=4,
-                      foreground="#555").grid(row=i, column=2, sticky="e")
-            eA = ttk.Entry(grid, textvariable=self.wall_p1[c], width=5)
-            eA.grid(row=i, column=3, padx=(1, 8))
-            self._wall_entA[c] = eA
+            grid.addWidget(QLabel(c.capitalize()), i, 0)
+            cb = QComboBox(); cb.addItems(["neumann", "dirichlet"])
+            cb.currentTextChanged.connect(lambda _t, k=c: self._maj_paroi(k))
+            grid.addWidget(cb, i, 1)
+            self.wall_kind[c] = cb
+            spin = make_double_spin(0.0)
+            spin.valueChanged.connect(self._scene_2d_modifiee)
+            grid.addWidget(spin, i, 2)
+            self.wall_p1[c] = spin
+        wl.addLayout(grid)
+        layout.addWidget(w)
         for c in COTES:
             self._maj_paroi(c)
 
-    # ----------------------------------------------------------- parois
-    def _maj_paroi(self, c):
-        kind = self.wall_kind[c].get()
-        la = "V" if kind == "dirichlet" else ""
-        self.wall_labA[c].set(la)
-        self._wall_entA[c].configure(state=("normal" if la else "disabled"))
 
-    def _charger_parois(self, event=None):
-        dom = self.page.domaine
-        try:
-            val = float(self.var_v.get()) if self.var_v else dom.defaut
-        except (ValueError, tk.TclError):
-            val = dom.defaut
-        walls = dom.walls_defaut(self.var_geom.get(), val)
+    def _charger_parois(self):
+        dom = self.controller.domaine
+        val = self.spin_v.value() if hasattr(self, "spin_v") else dom.defaut
+        walls = dom.walls_defaut(self.cb_geom.currentText(), val)
         for c in COTES:
             spec = walls.get(c, ("neumann",))
-            self.wall_kind[c].set(spec[0])
-            self.wall_p1[c].set(round(spec[1], 4) if spec[0] == "dirichlet" else 0.0)
+            self.wall_kind[c].setCurrentText(spec[0])
+            self.wall_p1[c].setValue(round(spec[1], 4) if spec[0] == "dirichlet" else 0.0)
             self._maj_paroi(c)
 
-    # ----------------------------------------------------------- obstacles
-    def _ajouter(self):
-        forme = self.ob_forme.get()
-        x, y, r = self.ob_x.get(), self.ob_y.get(), self.ob_r.get()
-        bc = ("isolant",) if self.ob_type.get() == "isolant" else ("dirichlet", self.ob_v.get())
+
+    def _obstacle_formulaire(self):
+        forme = self.cb_forme.currentText()
+        x, y, r = self.spin_ob_x.value(), self.spin_ob_y.value(), self.spin_ob_r.value()
+        type_sel = self.cb_type.currentText()
+        if type_sel.startswith(_PREFIXE_MATERIAU):
+            nom_materiau = type_sel[len(_PREFIXE_MATERIAU):]
+            kappa_val = kappa_pour_domaine(MATERIAUX[nom_materiau], "Electrostatique")
+            bc = ("materiau", kappa_val)
+        elif type_sel == "isolant":
+            bc = ("isolant",)
+        else:
+            bc = ("dirichlet", self.spin_ob_v.value())
         if forme == "disque":
             args = {"cx": x, "cy": y, "r": r}
         elif forme == "rectangle":
@@ -128,23 +146,94 @@ class ElectrostatiquePanel(BasePanel):
             args = {"x": x, "y0": y - r, "y1": y + r}
         else:
             args = {"y": y, "x0": x - r, "x1": x + r}
-        self.obstacles.append({"forme": forme, "args": args, "bc": bc})
-        self.liste.insert("end", f"{forme} {self.ob_type.get()} ({x:.2f},{y:.2f}) t={r:.2f}")
+        return {"forme": forme, "args": args, "bc": bc}
+
+    def _description_obstacle(self, obstacle):
+        forme, args, bc = obstacle["forme"], obstacle["args"], obstacle["bc"]
+        if "cx" in args:
+            x, y = args["cx"], args["cy"]
+            taille = args.get("r", args.get("r_ext", 0.0))
+        elif forme == "segment_v":
+            x, y = args["x"], (args["y0"] + args["y1"]) / 2
+            taille = (args["y1"] - args["y0"]) / 2
+        else:
+            x, y = (args["x0"] + args["x1"]) / 2, args.get(
+                "y", (args.get("y0", 0.0) + args.get("y1", 0.0)) / 2)
+            taille = (args["x1"] - args["x0"]) / 2
+        return f"{forme} {bc[0]} ({x:.2f},{y:.2f}) t={taille:.2f}"
+
+    def _rafraichir_obstacles(self, selection=None):
+        self.liste.blockSignals(True)
+        self.liste.clear()
+        for obstacle in self.obstacles:
+            self.liste.addItem(self._description_obstacle(obstacle))
+        self.liste.blockSignals(False)
+        if selection is not None and self.obstacles:
+            self.liste.setCurrentRow(min(selection, len(self.obstacles) - 1))
+        self._scene_2d_modifiee()
+
+    def _ajouter(self):
+        self.obstacles.append(self._obstacle_formulaire())
+        self._rafraichir_obstacles(len(self.obstacles) - 1)
+
+    def _mettre_a_jour_obstacle(self):
+        index = self.liste.currentRow()
+        if 0 <= index < len(self.obstacles):
+            self.obstacles[index] = self._obstacle_formulaire()
+            self._rafraichir_obstacles(index)
+
+    def _dupliquer_obstacle(self):
+        import copy
+        index = self.liste.currentRow()
+        if 0 <= index < len(self.obstacles):
+            self.obstacles.insert(index + 1, copy.deepcopy(self.obstacles[index]))
+            self._rafraichir_obstacles(index + 1)
+
+    def _supprimer_obstacle(self):
+        index = self.liste.currentRow()
+        if 0 <= index < len(self.obstacles):
+            self.obstacles.pop(index)
+            self._rafraichir_obstacles(index)
+
+    def _charger_obstacle(self, index):
+        if not 0 <= index < len(self.obstacles):
+            return
+        obstacle = self.obstacles[index]
+        forme, args, bc = obstacle["forme"], obstacle["args"], obstacle["bc"]
+        self.cb_forme.setCurrentText(forme)
+        if "cx" in args:
+            x, y = args["cx"], args["cy"]
+            taille = args.get("r", args.get("r_ext", 0.0))
+        elif forme == "segment_v":
+            x, y = args["x"], (args["y0"] + args["y1"]) / 2
+            taille = (args["y1"] - args["y0"]) / 2
+        else:
+            x = (args["x0"] + args["x1"]) / 2
+            y = args.get("y", (args.get("y0", 0.0) + args.get("y1", 0.0)) / 2)
+            taille = (args["x1"] - args["x0"]) / 2
+        self.spin_ob_x.setValue(x)
+        self.spin_ob_y.setValue(y)
+        self.spin_ob_r.setValue(taille)
+        if bc[0] == "dirichlet":
+            self.cb_type.setCurrentText("conducteur")
+            self.spin_ob_v.setValue(float(bc[1]))
+        elif bc[0] == "isolant":
+            self.cb_type.setCurrentText("isolant")
+        else:
+            for nom, materiau in MATERIAUX.items():
+                valeur = kappa_pour_domaine(materiau, "Electrostatique")
+                if np.isclose(valeur, bc[1]):
+                    self.cb_type.setCurrentText(_PREFIXE_MATERIAU + nom)
+                    break
 
     def _vider_obstacles(self):
         self.obstacles.clear()
         if hasattr(self, "liste"):
-            self.liste.delete(0, "end")
+            self._rafraichir_obstacles()
 
-    # ----------------------------------------------------------- params
-    def _walls(self):
-        d = {}
-        for c in COTES:
-            k = self.wall_kind[c].get()
-            d[c] = ("dirichlet", float(self.wall_p1[c].get())) if k == "dirichlet" else ("neumann",)
-        return d
 
     def contribute_params(self, d):
-        d["v"]         = float(self.var_v.get())
+        d["v"]         = float(self.spin_v.value())
         d["walls"]     = self._walls()
         d["obstacles"] = list(self.obstacles)
+        self._contribute_regime_variable(d)

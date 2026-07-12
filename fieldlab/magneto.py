@@ -1,10 +1,6 @@
-"""Scenarios de magnetostatique 2D (∇²A_z = -µ0 J_z, courants selon z).
-
-Les builders ne posent QUE les courants (sources). Le cadre A_z = 0 qui
-confine le flux est gere par les parois (walls_defaut -> Dirichlet 0 partout),
-donc modifiable depuis l'UI.
-"""
 import numpy as np
+
+from fieldlab.geometries import NOM_SCENE_LIBRE_2D
 
 COTES = ("haut", "bas", "gauche", "droite")
 
@@ -12,6 +8,10 @@ COTES = ("haut", "bas", "gauche", "droite")
 def _vides(N):
     return (np.zeros((N, N)), np.zeros((N, N), bool),
             np.zeros((N, N), bool), np.zeros((N, N)))
+
+
+def scene_libre(N, J):
+    return _vides(N)
 
 
 def _fil(src, cx, cy, r, J):
@@ -76,6 +76,7 @@ def nappe_courant(N, J):
 
 
 SCENARIOS = {
+    NOM_SCENE_LIBRE_2D: scene_libre,
     "Fil unique": fil_unique,
     "Deux fils (opposes)": deux_fils_opposes,
     "Deux fils (meme sens)": deux_fils_meme_sens,
@@ -89,6 +90,4 @@ NOMS = list(SCENARIOS)
 
 
 def walls_defaut(nom, val):
-    """Cadre A_z = 0 (Dirichlet) sur les 4 bords : confine le flux dans la
-    boite. Modifiable dans l'UI (en Neumann, le champ "sort" de la boite)."""
     return {c: ("dirichlet", 0.0) for c in COTES}

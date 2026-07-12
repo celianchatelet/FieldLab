@@ -3,6 +3,7 @@ from time import perf_counter
 
 import numpy as np
 
+from fieldlab.annulation import verifier
 from fieldlab.grid import Field
 
 
@@ -31,7 +32,8 @@ class SolverResult:
     historique: list
 
 
-def solve(field, step_fn, tol=1e-5, max_iter=10000, progress=None):
+def solve(field, step_fn, tol=1e-5, max_iter=10000, progress=None,
+          annule=None):
     field = field.copy()
     t0 = perf_counter()
     err = float("inf")
@@ -41,12 +43,18 @@ def solve(field, step_fn, tol=1e-5, max_iter=10000, progress=None):
     for it in range(1, max_iter + 1):
         err = step_fn(field)
         hist.append(err)
-        # Tolerance RELATIVE : robuste a l'echelle (sources fortes, radiation...).
+
         denom = max(float(np.max(np.abs(field.V))), 1e-12)
         rel = err / denom
         if progress is not None and it % 25 == 0:
             progress(it, err)
+        if it % 10 == 0:
+            verifier(annule)
         if rel < tol:
             break
     temps = perf_counter() - t0
-    return SolverResult(field, it, err, temps, rel < tol, hist)
+
+
+
+    fini = bool(np.all(np.isfinite(field.V)))
+    return SolverResult(field, it, err, temps, fini and rel < tol, hist)
