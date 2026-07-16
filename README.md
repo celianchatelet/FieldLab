@@ -1,7 +1,5 @@
 # FieldLab 2
 
-![FieldLab en mode Cours](docs/images/fieldlab-cours.png)
-
 FieldLab est un laboratoire multiphysique 2D/3D destiné aux cours de physique : électrostatique, magnétostatique et thermique. Le mode **Cours** fournit des scénarios prêts à simuler et des exports directement utilisables dans des diapositives ; le mode **Expert** expose le maillage, les solveurs et les conditions aux limites.
 
 FieldLab is a 2D/3D multiphysics laboratory for physics teaching: electrostatics, magnetostatics and heat transfer. **Classroom mode** provides ready-to-run scenarios and slide-ready exports; **Expert mode** exposes meshes, solvers and boundary conditions. The interface can switch between French and English from **Langue / Language**.
