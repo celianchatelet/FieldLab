@@ -19,6 +19,7 @@ def resoudre_regime_variable(scenarios, nom_scenario: str, N: int,
                               refine: int, duree: float, n_images: int,
                               kappa_fond: float = 1.0,
                               taille_domaine: float = 1.0,
+                              facteur_source: float = 1.0,
                               progress=None, annule=None) -> TransientResult:
     if forme not in FORMES_TEMPORELLES:
         raise KeyError(f"Forme temporelle inconnue : {forme!r}. Choix : {list(FORMES_TEMPORELLES)}")
@@ -39,7 +40,9 @@ def resoudre_regime_variable(scenarios, nom_scenario: str, N: int,
         verifier(annule)
         val = float(forme_fn(t, amplitude, frequence))
         field = geo.build(scenarios, nom_scenario, N, val, walls, obstacles,
-                           kappa_fond=kappa_fond, taille_domaine=taille_domaine)
+                           kappa_fond=kappa_fond,
+                           taille_domaine=taille_domaine,
+                           facteur_source=facteur_source)
         if methode_fem is not None:
             if systeme is None:
                 systeme = preparer_systeme(field, refine=refine)

@@ -44,7 +44,7 @@ DOMAINES = {
         scenarios_essentiels=(
             "Condensateur plan", "Dipole (deux disques)", "Cable coaxial",
             "Cage de Faraday", "Pointe - plan (effet de pointe)",
-            "Ligne bifilaire"),
+            "Condensateur avec diélectrique partiel", "Ligne bifilaire"),
     ),
     "Magnetostatique": Domaine(
         nom="Magnetostatique",
@@ -55,10 +55,10 @@ DOMAINES = {
 
 
 
-        scalaire="Potentiel A_z (u.a.)",
-        champ="Champ B (u.a.)",
-        label_val="Courant J",
-        defaut=20.0,
+        scalaire="Potentiel A_z (T·m)",
+        champ="Champ B (T)",
+        label_val="Densité de courant J (A/m²)",
+        defaut=100000.0,
         walls_defaut=magneto.walls_defaut,
         wall_types=_BASE,
         scenarios_essentiels=(
@@ -77,9 +77,11 @@ DOMAINES = {
         walls_defaut=thermique.walls_defaut,
         wall_types=_THERMIQUE,
         scenarios_essentiels=(
-            "Mur (gradient 1D)", "Tuyau chaud (enceinte froide)",
-            "Echangeur (obstacle isolant)", "Pont thermique",
-            "Processeur (4 blocs chauds)"),
+            "Mur composite (verre + plastique)",
+            "Ailette de refroidissement",
+            "Trempe (objet chaud dans l'eau)",
+            "Pont thermique", "Plancher chauffant",
+            "Tuyau chaud (enceinte froide)"),
     ),
 }
 

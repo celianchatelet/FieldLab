@@ -8,14 +8,16 @@ from matplotlib.figure import Figure
 from pyvistaqt import QtInteractor
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QGridLayout, QHBoxLayout, QLabel, QPushButton,
-    QSlider, QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
+    QButtonGroup, QFileDialog, QGridLayout, QHBoxLayout, QLabel,
+    QPushButton, QSlider, QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
 )
 from vtkmodules.vtkRenderingCore import vtkCellPicker
 
 from fieldlab import viz
 from fieldlab.app import theme as theme_app
 from fieldlab.app import viz3d
+from fieldlab.app.widgets_i18n import ComboBoxTraduit as QComboBox
+from fieldlab.i18n import tr
 from fieldlab.fem3d.calques import MODES_GRAINES
 from fieldlab.fem3d.coupe import fractions_plans, origine_plan_dans_bornes
 from fieldlab.fem3d import render as fem3d_render
@@ -24,8 +26,16 @@ from fieldlab.fem3d.rendu_p3 import (
     abscisses_cumulees, superpositions_coupe_par_defaut,
 )
 from fieldlab.grid import Field
+from fieldlab.unites import (
+    format_duree, format_grandeur, unite_depuis_libelle,
+)
 
-_VITESSES_MS = {"x0.5": 200, "x1": 100, "x2": 50, "x4": 25}
+_VITESSES_LECTURE = (1, 10, 100, 1000)
+_TAILLES_EXPORT = {
+    "1080p": (1920, 1080),
+    "1440p": (2560, 1440),
+    "4K": (3840, 2160),
+}
 
 
 @dataclass
@@ -76,6 +86,9 @@ class PlotPanel(QWidget):
         self._cb_placement_2d = None
         self._cid_placement = None
         self._cb_placement_3d = None
+        self._sondes_2d = []
+        self._points_profil_2d = []
+        self._donnees_profil_2d = None
 
 
         self.btn_2d = QPushButton("Vue 2D")
@@ -92,6 +105,15 @@ class PlotPanel(QWidget):
         barre_mode.addWidget(self.btn_2d)
         barre_mode.addWidget(self.btn_3d)
         barre_mode.addStretch(1)
+        self.btn_export_image = QPushButton("Exporter l'image")
+        self.btn_export_image.setToolTip(
+            "Crée un PNG 1080p, 1440p ou 4K avec unités et colorbar.")
+        self.btn_export_animation = QPushButton("Exporter l'animation")
+        self.btn_export_animation.setToolTip(
+            "Crée un GIF ou MP4 horodaté à partir du résultat temporel.")
+        self.btn_export_animation.setEnabled(False)
+        barre_mode.addWidget(self.btn_export_image)
+        barre_mode.addWidget(self.btn_export_animation)
 
 
         self._minuteur = QTimer(self)
@@ -105,10 +127,13 @@ class PlotPanel(QWidget):
         self.slider_temps = QSlider(Qt.Orientation.Horizontal)
         self.slider_temps.valueChanged.connect(self._afficher_instant)
         self.label_temps = QLabel("t = 0 s")
-        self.label_temps.setFixedWidth(90)
+        self.label_temps.setMinimumWidth(210)
         self.cb_vitesse = QComboBox()
-        self.cb_vitesse.addItems(list(_VITESSES_MS))
-        self.cb_vitesse.setCurrentText("x1")
+        for vitesse in _VITESSES_LECTURE:
+            self.cb_vitesse.addItem(f"×{vitesse}", vitesse)
+        self.cb_vitesse.setCurrentIndex(self.cb_vitesse.findData(1))
+        self.cb_vitesse.currentIndexChanged.connect(
+            self._vitesse_lecture_changee)
         self.lecteur = QWidget()
         ll = QHBoxLayout(self.lecteur)
         ll.setContentsMargins(0, 4, 0, 4)
@@ -139,6 +164,18 @@ class PlotPanel(QWidget):
                 lambda actif, nom=cle: self._basculer_calque_2d(nom, actif))
             barre_calques_2d.addWidget(bouton)
             self._boutons_calques_2d[cle] = bouton
+        self.btn_sonde_2d = QPushButton("Sonde")
+        self.btn_sonde_2d.setCheckable(True)
+        self.btn_sonde_2d.setToolTip(
+            "Cliquez pour épingler jusqu'à cinq valeurs sur la carte.")
+        self.btn_sonde_2d.toggled.connect(self._basculer_sonde_2d)
+        barre_calques_2d.addWidget(self.btn_sonde_2d)
+        self.btn_profil_2d = QPushButton("Profil 1D")
+        self.btn_profil_2d.setCheckable(True)
+        self.btn_profil_2d.setToolTip(
+            "Cliquez deux extrémités pour tracer la grandeur le long d'une ligne.")
+        self.btn_profil_2d.toggled.connect(self._basculer_profil_2d)
+        barre_calques_2d.addWidget(self.btn_profil_2d)
         barre_calques_2d.addStretch(1)
         for cle, bouton in self._boutons_calques_2d.items():
             bouton.setChecked(self._calques_2d[cle])
@@ -148,6 +185,26 @@ class PlotPanel(QWidget):
         l2d.addWidget(self.barre_calques_2d)
         l2d.addWidget(self.canvas, stretch=1)
         l2d.addWidget(self.toolbar)
+
+        self.figure_profil_2d = Figure(figsize=(6, 1.5), dpi=100)
+        self.ax_profil_2d = self.figure_profil_2d.add_subplot(111)
+        self.canvas_profil_2d = FigureCanvasQTAgg(self.figure_profil_2d)
+        self.canvas_profil_2d.setMaximumHeight(180)
+        self.profil_2d = QWidget()
+        lp2 = QVBoxLayout(self.profil_2d)
+        lp2.setContentsMargins(0, 2, 0, 2)
+        barre_profil = QHBoxLayout()
+        barre_profil.addWidget(QLabel("Profil le long de la ligne"))
+        barre_profil.addStretch(1)
+        btn_csv_profil = QPushButton("Exporter CSV")
+        btn_csv_profil.clicked.connect(self._exporter_profil_2d_csv)
+        btn_png_profil = QPushButton("Exporter PNG")
+        btn_png_profil.clicked.connect(self._exporter_profil_2d_png)
+        barre_profil.addWidget(btn_csv_profil)
+        barre_profil.addWidget(btn_png_profil)
+        lp2.addLayout(barre_profil)
+        lp2.addWidget(self.canvas_profil_2d)
+        self.profil_2d.hide()
 
 
         self.interactor = QtInteractor(self)
@@ -373,8 +430,9 @@ class PlotPanel(QWidget):
         self.cb_graines_3d.setToolTip(
             "Répartition des graines des lignes de champ : Volume "
             "(tout l'espace, défaut), Plan, Surface ou Ligne")
-        self.cb_graines_3d.currentTextChanged.connect(
-            self._changer_mode_graines_3d)
+        self.cb_graines_3d.currentIndexChanged.connect(
+            lambda: self._changer_mode_graines_3d(
+                self.cb_graines_3d.currentText()))
         p3.addWidget(lab_graines, 2, 0)
         p3.addWidget(self.cb_graines_3d, 2, 1)
         self.btn_graines_diag_3d = QPushButton("Voir graines")
@@ -434,6 +492,7 @@ class PlotPanel(QWidget):
         layout.addWidget(self.barre_p3_3d)
         layout.addWidget(self.lecteur)
         layout.addWidget(self.stack, stretch=1)
+        layout.addWidget(self.profil_2d)
         layout.addWidget(self.profil_3d)
         layout.addWidget(self.label_sonde)
 
@@ -819,9 +878,11 @@ class PlotPanel(QWidget):
             self.ax, result.champ, self._calques_2d,
             dom.champ_fn, dom.scalaire, dom.champ,
             fond_intensite=self._fond_intensite_2d)
+        self._dessiner_mesures_2d(result.champ)
         self._styler_figure(self.figure)
         self.figure.tight_layout()
         self.canvas.draw()
+        self._actualiser_profil_2d(result.champ)
 
     def _redraw_3d(self, result, kind):
         self._maj_controles_p3()
@@ -1084,8 +1145,11 @@ class PlotPanel(QWidget):
         if info is None:
             return
         valeur, p = info.valeur_au_point(point)
+        unite = unite_depuis_libelle(info.libelle)
+        valeur_formatee = (format_grandeur(valeur, unite)
+                           if unite else f"{valeur:.4g}")
         self.label_sonde.setText(
-            f"Sonde : {info.libelle} = {valeur:.4g} "
+            f"Sonde : {info.libelle} = {valeur_formatee} "
             f"au point ({p[0]:.3f}, {p[1]:.3f}, {p[2]:.3f}) m.")
 
     def _installer_sonde_ligne_3d(self):
@@ -1168,25 +1232,159 @@ class PlotPanel(QWidget):
             return
         self._mettre_a_jour_sonde_3d(point)
 
+    @staticmethod
+    def _echantillonner_2d(champ, x, y):
+        valeurs = np.asarray(champ.V, dtype=float)
+        ny, nx = valeurs.shape
+        L = float(getattr(champ, "taille_domaine", 1.0) or 1.0)
+        xi = np.clip(np.asarray(x, dtype=float) / L * (nx - 1), 0, nx - 1)
+        yi = np.clip(np.asarray(y, dtype=float) / L * (ny - 1), 0, ny - 1)
+        x0 = np.floor(xi).astype(int)
+        y0 = np.floor(yi).astype(int)
+        x1 = np.minimum(x0 + 1, nx - 1)
+        y1 = np.minimum(y0 + 1, ny - 1)
+        tx, ty = xi - x0, yi - y0
+        return ((1 - tx) * (1 - ty) * valeurs[y0, x0]
+                + tx * (1 - ty) * valeurs[y0, x1]
+                + (1 - tx) * ty * valeurs[y1, x0]
+                + tx * ty * valeurs[y1, x1])
 
-    def activer_placement_2d(self, callback):
-        self._cb_placement_2d = callback
-        if callback is not None and self._cid_placement is None:
+    def _mettre_a_jour_connexion_clic_2d(self):
+        actif = (self._cb_placement_2d is not None
+                 or self.btn_sonde_2d.isChecked()
+                 or self.btn_profil_2d.isChecked())
+        if actif and self._cid_placement is None:
             self._cid_placement = self.canvas.mpl_connect(
                 "button_press_event", self._sur_clic_2d)
-        elif callback is None and self._cid_placement is not None:
+        elif not actif and self._cid_placement is not None:
             self.canvas.mpl_disconnect(self._cid_placement)
             self._cid_placement = None
 
+    def _basculer_sonde_2d(self, actif):
+        if actif and self.btn_profil_2d.isChecked():
+            self.btn_profil_2d.setChecked(False)
+        self._mettre_a_jour_connexion_clic_2d()
+        if actif:
+            self.label_sonde.setText(
+                "Sonde 2D : cliquez sur la carte pour épingler une valeur.")
+            self.label_sonde.show()
+
+    def _basculer_profil_2d(self, actif):
+        if actif:
+            if self.btn_sonde_2d.isChecked():
+                self.btn_sonde_2d.setChecked(False)
+            self._points_profil_2d = []
+            self.label_sonde.setText(
+                "Profil 1D : cliquez la première puis la seconde extrémité.")
+            self.label_sonde.show()
+        self._mettre_a_jour_connexion_clic_2d()
+
+    def _dessiner_mesures_2d(self, champ):
+        unite = unite_depuis_libelle(self.domaine.scalaire)
+        details = []
+        for index, (x, y) in enumerate(self._sondes_2d, start=1):
+            valeur = float(self._echantillonner_2d(champ, x, y))
+            texte = (format_grandeur(valeur, unite)
+                     if unite else f"{valeur:.4g}")
+            self.ax.plot(x, y, marker="o", color="#22c55e",
+                         markeredgecolor="white", markersize=6, zorder=20)
+            self.ax.annotate(
+                f"S{index}: {texte}", (x, y), xytext=(6, 7),
+                textcoords="offset points", fontsize=8, color="white",
+                bbox={"boxstyle": "round,pad=0.25", "fc": "#111827",
+                      "alpha": 0.82}, zorder=21)
+            details.append(f"S{index} ({x:.3g}, {y:.3g}) m : {texte}")
+        if len(self._points_profil_2d) == 2:
+            (xa, ya), (xb, yb) = self._points_profil_2d
+            self.ax.plot([xa, xb], [ya, yb], color="#2563eb",
+                         linewidth=2.0, marker="o", zorder=19)
+        if details and not self.btn_profil_2d.isChecked():
+            self.label_sonde.setText("Sondes — " + " · ".join(details))
+            self.label_sonde.show()
+
+    def _actualiser_profil_2d(self, champ=None):
+        if len(self._points_profil_2d) != 2:
+            return
+        champ = champ or getattr(self._dernier_resultat, "champ", None)
+        if champ is None or getattr(champ.V, "ndim", 0) != 2:
+            return
+        point_a, point_b = np.asarray(self._points_profil_2d, dtype=float)
+        fraction = np.linspace(0.0, 1.0, 250)
+        points = point_a[None, :] + fraction[:, None] * (point_b - point_a)
+        valeurs = np.asarray(
+            self._echantillonner_2d(champ, points[:, 0], points[:, 1]))
+        longueur = float(np.linalg.norm(point_b - point_a))
+        distances = fraction * longueur
+        self._donnees_profil_2d = (distances, valeurs)
+        self.ax_profil_2d.clear()
+        self.ax_profil_2d.plot(distances, valeurs, color="#2563eb")
+        self.ax_profil_2d.set_xlabel(tr("Distance le long du segment (m)"))
+        self.ax_profil_2d.set_ylabel(tr(self.domaine.scalaire))
+        self.ax_profil_2d.set_title(
+            f"min = {valeurs.min():.4g} · max = {valeurs.max():.4g}",
+            fontsize=9)
+        self.ax_profil_2d.grid(True, alpha=0.25)
+        self._styler_figure(self.figure_profil_2d)
+        self.figure_profil_2d.tight_layout()
+        self.canvas_profil_2d.draw_idle()
+        self.profil_2d.show()
+
+    def _exporter_profil_2d_csv(self):
+        if self._donnees_profil_2d is None:
+            return
+        chemin, _ = QFileDialog.getSaveFileName(
+            self, tr("Exporter le profil"), "", "CSV (*.csv)")
+        if not chemin:
+            return
+        import csv
+        distances, valeurs = self._donnees_profil_2d
+        with open(chemin, "w", encoding="utf-8", newline="") as fichier:
+            writer = csv.writer(fichier)
+            writer.writerow(["distance_m", self.domaine.scalaire])
+            writer.writerows(zip(distances, valeurs))
+
+    def _exporter_profil_2d_png(self):
+        if self._donnees_profil_2d is None:
+            return
+        chemin, _ = QFileDialog.getSaveFileName(
+            self, tr("Exporter le profil"), "", "PNG (*.png)")
+        if chemin:
+            self.figure_profil_2d.savefig(
+                chemin, dpi=200, bbox_inches="tight", facecolor="white")
+
+
+    def activer_placement_2d(self, callback):
+        self._cb_placement_2d = callback
+        self._mettre_a_jour_connexion_clic_2d()
+
     def _sur_clic_2d(self, event):
-        if self._cb_placement_2d is None or event.button != 1:
+        if event.button != 1:
             return
         if event.xdata is None or event.ydata is None:
             return
-
-
-
         champ = getattr(self._dernier_resultat, "champ", None)
+        if champ is not None and getattr(champ.V, "ndim", 0) == 2:
+            L = float(getattr(champ, "taille_domaine", 1.0) or 1.0)
+            x_m = min(max(float(event.xdata), 0.0), L)
+            y_m = min(max(float(event.ydata), 0.0), L)
+            if self.btn_profil_2d.isChecked():
+                self._points_profil_2d.append((x_m, y_m))
+                if len(self._points_profil_2d) == 1:
+                    self.label_sonde.setText(
+                        "Profil 1D : première extrémité posée; cliquez la seconde.")
+                else:
+                    self._points_profil_2d = self._points_profil_2d[-2:]
+                    self._actualiser_profil_2d(champ)
+                    self.btn_profil_2d.setChecked(False)
+                    self._redraw_2d(self._dernier_resultat, self._dernier_kind)
+                return
+            if self.btn_sonde_2d.isChecked():
+                self._sondes_2d.append((x_m, y_m))
+                self._sondes_2d = self._sondes_2d[-5:]
+                self._redraw_2d(self._dernier_resultat, self._dernier_kind)
+                return
+        if self._cb_placement_2d is None:
+            return
         if champ is not None and getattr(champ, "V", None) is not None \
                 and getattr(champ.V, "ndim", 0) == 2:
             L = float(getattr(champ, "taille_domaine", 1.0) or 1.0)
@@ -1211,8 +1409,12 @@ class PlotPanel(QWidget):
     def _on_mode_3d(self, actif):
         self.stack.setCurrentIndex(1 if actif else 0)
         self._maj_barres_3d()
-        if not actif:
+        if actif:
+            self.profil_2d.hide()
+        else:
             self.profil_3d.hide()
+            if self._donnees_profil_2d is not None:
+                self.profil_2d.show()
         if self._transitoire is not None:
             self._afficher_instant(self.slider_temps.value())
         elif self._dernier_resultat is not None:
@@ -1229,6 +1431,7 @@ class PlotPanel(QWidget):
         self._minuteur.stop()
         self.btn_lecture.setChecked(False)
         self._transitoire = transitoire
+        self.btn_export_animation.setEnabled(True)
         self._forcer_3d_si_natif(transitoire)
         self.lecteur.show()
         self.slider_temps.blockSignals(True)
@@ -1242,6 +1445,7 @@ class PlotPanel(QWidget):
             self._minuteur.stop()
             self.btn_lecture.setChecked(False)
             self._transitoire = None
+        self.btn_export_animation.setEnabled(False)
         self.lecteur.hide()
 
     def _afficher_instant(self, index):
@@ -1249,7 +1453,9 @@ class PlotPanel(QWidget):
             return
         champ = self._transitoire.champs[index]
         t = self._transitoire.instants[index]
-        self.label_temps.setText(f"t = {t:.3g} s")
+        vitesse = int(self.cb_vitesse.currentData() or 1)
+        self.label_temps.setText(
+            f"t = {format_duree(t)} — lecture ×{vitesse}")
         self._dernier_resultat = _Instant(champ)
         if self.btn_3d.isChecked():
             self._redraw_3d(self._dernier_resultat, self._dernier_kind)
@@ -1260,11 +1466,35 @@ class PlotPanel(QWidget):
         if actif:
             if self.slider_temps.value() >= self.slider_temps.maximum():
                 self.slider_temps.setValue(0)
-            self._minuteur.start(_VITESSES_MS[self.cb_vitesse.currentText()])
+            self._minuteur.start(self._intervalle_lecture_ms())
             self.btn_lecture.setText("Pause")
         else:
             self._minuteur.stop()
             self.btn_lecture.setText("Lecture")
+
+    def _intervalle_lecture_ms(self):
+        if self._transitoire is None or len(self._transitoire.instants) < 2:
+            return 100
+        index = min(self.slider_temps.value(),
+                    len(self._transitoire.instants) - 2)
+        delta_simule = max(
+            0.001,
+            float(self._transitoire.instants[index + 1])
+            - float(self._transitoire.instants[index]))
+        vitesse = max(1, int(self.cb_vitesse.currentData() or 1))
+        return int(max(10, min(2_147_000_000,
+                               1000.0 * delta_simule / vitesse)))
+
+    def _vitesse_lecture_changee(self, _index=None):
+        if self._transitoire is not None:
+            self._afficher_instant(self.slider_temps.value())
+        if self.btn_lecture.isChecked():
+            self._minuteur.start(self._intervalle_lecture_ms())
+
+    def set_vitesse_lecture(self, vitesse):
+        index = self.cb_vitesse.findData(int(vitesse))
+        if index >= 0:
+            self.cb_vitesse.setCurrentIndex(index)
 
     def _pas_suivant(self):
         i = self.slider_temps.value()
@@ -1272,12 +1502,62 @@ class PlotPanel(QWidget):
             self.btn_lecture.setChecked(False)
             return
         self.slider_temps.setValue(i + 1)
+        if self.btn_lecture.isChecked():
+            self._minuteur.start(self._intervalle_lecture_ms())
 
-    def save_png(self, path):
+    def save_png(self, path, resolution="1080p", fond="blanc", titre=None):
+        largeur, hauteur = _TAILLES_EXPORT.get(
+            resolution, _TAILLES_EXPORT["1080p"])
+        transparent = fond == "transparent"
         if self.btn_3d.isChecked():
-            self.interactor.screenshot(path)
+            acteur_titre = None
+            if titre:
+                acteur_titre = self.interactor.add_text(
+                    titre, position="upper_edge", font_size=15,
+                    name="titre_export_fieldlab")
+            fond_avant = "#111827" if self._theme_sombre else "white"
+            self.interactor.set_background(
+                "white" if fond == "blanc" else fond_avant)
+            try:
+                self.interactor.screenshot(
+                    path, window_size=(largeur, hauteur),
+                    transparent_background=transparent)
+            finally:
+                self.interactor.set_background(fond_avant)
+                if acteur_titre is not None:
+                    try:
+                        self.interactor.remove_actor(acteur_titre)
+                    except (AttributeError, RuntimeError):
+                        pass
         else:
-            self.figure.savefig(path, dpi=200, bbox_inches="tight")
+            taille_avant = self.figure.get_size_inches().copy()
+            titre_avant = (self.figure._suptitle.get_text()
+                           if self.figure._suptitle is not None else None)
+            dpi = 200
+            self.figure.set_size_inches(largeur / dpi, hauteur / dpi)
+            if titre:
+                self.figure.suptitle(titre)
+            if fond == "blanc":
+                self.figure.set_facecolor("white")
+                for axe in self.figure.axes:
+                    axe.set_facecolor("white")
+                    axe.tick_params(colors="#111827")
+                    axe.xaxis.label.set_color("#111827")
+                    axe.yaxis.label.set_color("#111827")
+                    axe.title.set_color("#111827")
+            try:
+                self.figure.savefig(
+                    path, dpi=dpi, transparent=transparent,
+                    facecolor="none" if transparent else "white")
+            finally:
+                self.figure.set_size_inches(taille_avant)
+                if titre_avant:
+                    self.figure.suptitle(titre_avant)
+                elif self.figure._suptitle is not None:
+                    self.figure._suptitle.remove()
+                    self.figure._suptitle = None
+                self._styler_figure(self.figure)
+                self.canvas.draw_idle()
 
     def image_png(self) -> bytes:
         flux = BytesIO()
@@ -1291,29 +1571,58 @@ class PlotPanel(QWidget):
                 flux, format="png", dpi=180, bbox_inches="tight")
         return flux.getvalue()
 
-    def export_video(self, path, fps=10):
+    @staticmethod
+    def _incruster_horodatage(image, secondes):
+        from PIL import Image, ImageDraw
+
+        image_pil = Image.fromarray(np.asarray(image, dtype=np.uint8)).convert("RGB")
+        dessin = ImageDraw.Draw(image_pil)
+        texte = f"t = {format_duree(secondes)}"
+        boite = dessin.textbbox((0, 0), texte)
+        largeur, hauteur = boite[2] - boite[0], boite[3] - boite[1]
+        marge = max(12, image_pil.width // 120)
+        xy = (marge, marge)
+        dessin.rounded_rectangle(
+            (xy[0] - 6, xy[1] - 5, xy[0] + largeur + 7,
+             xy[1] + hauteur + 6), radius=5, fill=(17, 24, 39))
+        dessin.text(xy, texte, fill="white")
+        return np.asarray(image_pil)
+
+    def export_video(self, path, duree_video=10.0, resolution="1080p",
+                     horodatage=True):
         if self._transitoire is None:
             raise ValueError("Aucune animation active à exporter "
                               "(lancez d'abord une simulation transitoire ou variable).")
         import numpy as np
         import imageio.v2 as imageio
 
+        largeur, hauteur = _TAILLES_EXPORT.get(
+            resolution, _TAILLES_EXPORT["1080p"])
+        nombre_images = len(self._transitoire.champs)
+        fps = max(1.0, (nombre_images - 1) / max(float(duree_video), 0.1))
         index_avant = self.slider_temps.value()
+        taille_figure_avant = self.figure.get_size_inches().copy()
         try:
             with imageio.get_writer(path, fps=fps) as writer:
-                for i in range(len(self._transitoire.champs)):
+                for i in range(nombre_images):
                     self.slider_temps.blockSignals(True)
                     self.slider_temps.setValue(i)
                     self.slider_temps.blockSignals(False)
                     self._afficher_instant(i)
                     if self.btn_3d.isChecked():
                         self.interactor.render()
-                        image = self.interactor.screenshot(return_img=True)
+                        image = self.interactor.screenshot(
+                            return_img=True, window_size=(largeur, hauteur))
                     else:
+                        self.figure.set_size_inches(largeur / 100, hauteur / 100)
                         self.canvas.draw()
                         image = np.asarray(self.canvas.buffer_rgba())[:, :, :3]
+                    if horodatage:
+                        image = self._incruster_horodatage(
+                            image, self._transitoire.instants[i])
                     writer.append_data(image)
         finally:
+            self.figure.set_size_inches(taille_figure_avant)
             self.slider_temps.blockSignals(True)
             self.slider_temps.setValue(index_avant)
             self.slider_temps.blockSignals(False)
@@ -1335,6 +1644,11 @@ class PlotPanel(QWidget):
         self._selection_scalaire_3d = "Scalaire principal"
         self._bornes_plans_3d = None
         self._extremites_sonde_ligne_3d = None
+        self._sondes_2d = []
+        self._points_profil_2d = []
+        self._donnees_profil_2d = None
+        self.btn_sonde_2d.setChecked(False)
+        self.btn_profil_2d.setChecked(False)
         self._synchroniser_boutons_calques()
         self._appliquer_prereglage_calques_2d("Carte scalaire")
         self.cb_normale_coupe_3d.setCurrentText("X")
@@ -1363,6 +1677,7 @@ class PlotPanel(QWidget):
             self.configurer_defaut_magnetique_3d(
                 selectionner_intensite=False)
         self.profil_3d.hide()
+        self.profil_2d.hide()
         self.figure.clf()
         self.ax = self.figure.add_subplot(111)
         self.interactor.clear()

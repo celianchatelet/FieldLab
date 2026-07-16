@@ -62,7 +62,9 @@ def preparer_systeme_3d(field: Field3D) -> SystemeFEM3D:
     mesh, basis = field.mesh, field.basis
     kappa_nodal = np.where(field.solid_mask, _KAPPA_ISOLANT, field.kappa)
     K = _laplace_kappa.assemble(basis, kappa=basis.interpolate(kappa_nodal))
-    b = _load.assemble(basis, f=basis.interpolate(field.source))
+    source_equation = field.source * float(
+        getattr(field, "facteur_source", 1.0))
+    b = _load.assemble(basis, f=basis.interpolate(source_equation))
     K, b = _appliquer_robin(K, b, mesh, basis, field.walls)
     return SystemeFEM3D(mesh, basis, K, b)
 
@@ -132,7 +134,8 @@ def resoudre_systeme_3d(systeme: SystemeFEM3D, field: Field3D, methode: str = "d
                      vecteurs=(None if field.vecteurs is None
                                else field.vecteurs.copy()),
                      libelle_scalaire=field.libelle_scalaire,
-                     scene=field.scene, rho_cp=field.rho_cp.copy())
+                     scene=field.scene, rho_cp=field.rho_cp.copy(),
+                     facteur_source=field.facteur_source)
     return FemSolverResult3D(champ, iterations, erreur, temps, converge, [])
 
 

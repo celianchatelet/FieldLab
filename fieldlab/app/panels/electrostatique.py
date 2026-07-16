@@ -1,18 +1,24 @@
 import numpy as np
 
 from PySide6.QtWidgets import (
-    QComboBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget,
+    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget,
     QPushButton, QVBoxLayout,
 )
 
+from fieldlab.app.widgets_i18n import ComboBoxTraduit as QComboBox
 from fieldlab.obstacles import FORMES
 from fieldlab.materials import MATERIAUX, NOMS_MATERIAUX, kappa_pour_domaine
 from fieldlab.app.panels.base import BasePanel, COTES, make_double_spin
+from fieldlab.app.vocabulaire_domaine import (
+    libelle_parametre_2d, libelle_role,
+)
 from fieldlab.fem3d.scenarios_par_domaine import SCENARIOS_3D_ELECTROSTATIQUE
 
 _PREFIXE_MATERIAU = "materiau : "
-_TYPES_OBSTACLE = ["isolant", "conducteur"] + [
-    f"{_PREFIXE_MATERIAU}{nom}" for nom in NOMS_MATERIAUX]
+_LIBELLE_ELECTRODE = libelle_role("Electrostatique", "electrode")
+_LIBELLE_ISOLANT = libelle_role("Electrostatique", "isolant")
+_LIBELLE_MATERIAU = libelle_role("Electrostatique", "materiau")
+_LIBELLE_SOURCE = libelle_role("Electrostatique", "source")
 
 
 class ElectrostatiquePanel(BasePanel):
@@ -30,8 +36,17 @@ class ElectrostatiquePanel(BasePanel):
         p = QGroupBox("Paramètres")
         pl = QVBoxLayout(p)
         self.spin_v = make_double_spin(dom.defaut)
-        self._row(pl, "Tension (V)", self.spin_v)
-        self._row(pl, "Résolution N", self.spin_N)
+        self.spin_v.setToolTip(
+            "Différence de potentiel imposée aux électrodes, en volts.")
+        self._row(pl, libelle_parametre_2d("Electrostatique"), self.spin_v)
+        self._row(pl, "Résolution N", self.spin_N, niveau="expert")
+        info_2d = QLabel(
+            "Le modèle 2D est une coupe d'une géométrie invariante selon z. "
+            "Une charge saisie est donc une densité volumique ρ (C/m³), "
+            "constante hors du plan.")
+        info_2d.setWordWrap(True)
+        info_2d.setStyleSheet("color: gray;")
+        pl.addWidget(info_2d)
         layout.addWidget(p)
         self._build_environnement(layout)
         self._build_regime_variable(layout)
@@ -40,15 +55,25 @@ class ElectrostatiquePanel(BasePanel):
         o = QGroupBox("Obstacles")
         self.groupe_edition_2d = o
         ol = QVBoxLayout(o)
-        info = QLabel("conducteur : tension V imposée  ·  isolant : bloque le champ\n"
-                       "matériau : permittivité réelle (solveur FEM)")
+        info = QLabel(
+            f"{_LIBELLE_ELECTRODE} : tension V fixée  ·  "
+            f"{_LIBELLE_ISOLANT} : bloque le champ\n"
+            f"{_LIBELLE_MATERIAU} : permittivité réelle (solveur FEM)\n"
+            f"{_LIBELLE_SOURCE} : ρ en C/m³, avec −div(εᵣ∇V)=ρ/ε₀")
         info.setWordWrap(True)
         info.setStyleSheet("color: gray;")
         ol.addWidget(info)
 
         r1 = QHBoxLayout()
         self.cb_forme = QComboBox(); self.cb_forme.addItems(list(FORMES))
-        self.cb_type = QComboBox(); self.cb_type.addItems(_TYPES_OBSTACLE)
+        self.cb_type = QComboBox()
+        self.cb_type.addItem(_LIBELLE_ISOLANT, "isolant")
+        self.cb_type.addItem(_LIBELLE_ELECTRODE, "conducteur")
+        self.cb_type.addItem(_LIBELLE_SOURCE, "source")
+        for nom in NOMS_MATERIAUX:
+            self.cb_type.addItem(
+                f"{_LIBELLE_MATERIAU} : {nom}",
+                f"{_PREFIXE_MATERIAU}{nom}")
         r1.addWidget(self.cb_forme)
         r1.addWidget(self.cb_type)
         ol.addLayout(r1)
@@ -59,9 +84,14 @@ class ElectrostatiquePanel(BasePanel):
         self.spin_ob_r = make_double_spin(0.1, 0.0, 1.0, decimals=3, step=0.01)
         self.spin_ob_v = make_double_spin(5.0)
         for lab, w in (("x", self.spin_ob_x), ("y", self.spin_ob_y),
-                       ("taille", self.spin_ob_r), ("V", self.spin_ob_v)):
+                       ("taille", self.spin_ob_r)):
             r2.addWidget(QLabel(lab))
             r2.addWidget(w)
+        self.label_valeur_obstacle = QLabel("V (V)")
+        r2.addWidget(self.label_valeur_obstacle)
+        r2.addWidget(self.spin_ob_v)
+        self.cb_type.currentIndexChanged.connect(
+            self._maj_unite_valeur_obstacle)
         ol.addLayout(r2)
 
         r3 = QHBoxLayout()
@@ -83,6 +113,12 @@ class ElectrostatiquePanel(BasePanel):
         self.liste.currentRowChanged.connect(self._charger_obstacle)
         ol.addWidget(self.liste)
         layout.addWidget(o)
+        self._maj_unite_valeur_obstacle()
+
+    def _maj_unite_valeur_obstacle(self, *_args):
+        type_sel = self.cb_type.currentData()
+        self.label_valeur_obstacle.setText(
+            "ρ (C/m³)" if type_sel == "source" else "V (V)")
 
     def _build_walls(self, layout, dom):
         w = QGroupBox("Parois du domaine")
@@ -127,13 +163,15 @@ class ElectrostatiquePanel(BasePanel):
     def _obstacle_formulaire(self):
         forme = self.cb_forme.currentText()
         x, y, r = self.spin_ob_x.value(), self.spin_ob_y.value(), self.spin_ob_r.value()
-        type_sel = self.cb_type.currentText()
+        type_sel = self.cb_type.currentData() or self.cb_type.currentText()
         if type_sel.startswith(_PREFIXE_MATERIAU):
             nom_materiau = type_sel[len(_PREFIXE_MATERIAU):]
             kappa_val = kappa_pour_domaine(MATERIAUX[nom_materiau], "Electrostatique")
             bc = ("materiau", kappa_val)
         elif type_sel == "isolant":
             bc = ("isolant",)
+        elif type_sel == "source":
+            bc = ("source", self.spin_ob_v.value())
         else:
             bc = ("dirichlet", self.spin_ob_v.value())
         if forme == "disque":
@@ -160,7 +198,15 @@ class ElectrostatiquePanel(BasePanel):
             x, y = (args["x0"] + args["x1"]) / 2, args.get(
                 "y", (args.get("y0", 0.0) + args.get("y1", 0.0)) / 2)
             taille = (args["x1"] - args["x0"]) / 2
-        return f"{forme} {bc[0]} ({x:.2f},{y:.2f}) t={taille:.2f}"
+        if bc[0] == "dirichlet":
+            role = f"{_LIBELLE_ELECTRODE} V={float(bc[1]):g} V"
+        elif bc[0] == "isolant":
+            role = _LIBELLE_ISOLANT
+        elif bc[0] == "source":
+            role = f"{_LIBELLE_SOURCE} ρ={float(bc[1]):.3g} C/m³"
+        else:
+            role = _LIBELLE_MATERIAU
+        return f"{forme} {role} ({x:.2f},{y:.2f}) t={taille:.2f}"
 
     def _rafraichir_obstacles(self, selection=None):
         self.liste.blockSignals(True)
@@ -215,15 +261,19 @@ class ElectrostatiquePanel(BasePanel):
         self.spin_ob_y.setValue(y)
         self.spin_ob_r.setValue(taille)
         if bc[0] == "dirichlet":
-            self.cb_type.setCurrentText("conducteur")
+            self.cb_type.setCurrentIndex(self.cb_type.findData("conducteur"))
             self.spin_ob_v.setValue(float(bc[1]))
         elif bc[0] == "isolant":
-            self.cb_type.setCurrentText("isolant")
+            self.cb_type.setCurrentIndex(self.cb_type.findData("isolant"))
+        elif bc[0] == "source":
+            self.cb_type.setCurrentIndex(self.cb_type.findData("source"))
+            self.spin_ob_v.setValue(float(bc[1]))
         else:
             for nom, materiau in MATERIAUX.items():
                 valeur = kappa_pour_domaine(materiau, "Electrostatique")
                 if np.isclose(valeur, bc[1]):
-                    self.cb_type.setCurrentText(_PREFIXE_MATERIAU + nom)
+                    self.cb_type.setCurrentIndex(
+                        self.cb_type.findData(_PREFIXE_MATERIAU + nom))
                     break
 
     def _vider_obstacles(self):

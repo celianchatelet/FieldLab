@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verifier:
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYVISTA_OFF_SCREEN: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bibliothèques système pour Qt, gmsh et VTK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libglu1-mesa libxkbcommon-x11-0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --extra dev
+      - name: Lint bloquant
+        run: uv run ruff check --select E9,F63,F7,F82 fieldlab tests main.py
+      - name: Tests
+        run: uv run pytest -q

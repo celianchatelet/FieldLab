@@ -5,7 +5,7 @@ import numpy as np
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QGroupBox, QHBoxLayout, QLabel,
+    QCheckBox, QDoubleSpinBox, QGroupBox, QHBoxLayout, QLabel,
     QLineEdit, QMessageBox, QProgressBar, QPushButton, QScrollArea,
     QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
@@ -18,8 +18,20 @@ from fieldlab import geometries as geo
 from fieldlab.geometries import NOM_SCENE_LIBRE_2D
 from fieldlab.fem3d import render as fem3d_render
 from fieldlab.app.scene_editor_panel import SceneEditorPanel
+from fieldlab.app.vocabulaire_domaine import (
+    aide_conditions_limites_3d, conditions_limites_3d,
+    defauts_condition_limite_3d, libelle_condition_limite_3d,
+    libelles_parametres_condition_limite_3d,
+)
 
+from fieldlab.app.widgets_i18n import ComboBoxTraduit as QComboBox
+from fieldlab.i18n import tr
 COTES = ["haut", "bas", "gauche", "droite"]
+FACES_3D = (
+    ("gauche", "X− · gauche"), ("droite", "X+ · droite"),
+    ("avant", "Y− · avant"), ("arriere", "Y+ · arrière"),
+    ("bas", "Z− · bas"), ("haut", "Z+ · haut"),
+)
 _PREFIXE_SCENE_LIBRE = "Scène libre"
 
 
@@ -57,16 +69,16 @@ class BasePanel(QWidget):
 
 
 
-    PAROIS_3D_KINDS = ("neumann", "dirichlet")
-    LIBELLES_PAROI_3D = {"neumann": ("", ""), "dirichlet": ("valeur", "")}
-
     def __init__(self, controller, parent=None):
         super().__init__(parent)
         self.controller = controller
         dom = controller.domaine
+        self._mode_interface = "expert"
+        self._widgets_experts = []
         self._defaut_magnetique_3d_applique = False
         self._boutons_placement_2d = []
         self._chargement_scene_2d = False
+        self._chargement_parois_3d = False
         self._dernier_scenario_2d = None
         self._parois_scene_libre_2d = None
 
@@ -103,7 +115,9 @@ class BasePanel(QWidget):
         bl.setContentsMargins(10, 6, 10, 6)
         actions = QHBoxLayout()
         self.run_btn = QPushButton("Lancer la simulation")
-        self.run_btn.clicked.connect(self.controller.run_simulation)
+        self.run_btn.setToolTip(
+            "Calcule le champ avec les paramètres affichés.")
+        self.run_btn.clicked.connect(self._lancer_simulation)
         actions.addWidget(self.run_btn, stretch=2)
         self.cancel_btn = QPushButton("Annuler")
         self.cancel_btn.setEnabled(False)
@@ -112,6 +126,7 @@ class BasePanel(QWidget):
         self.reset_btn = QPushButton("Réinitialiser")
         self.reset_btn.clicked.connect(self.controller.reinitialiser)
         actions.addWidget(self.reset_btn)
+        self._declarer_niveau(self.reset_btn, "expert")
         bl.addLayout(actions)
         self.progress = QProgressBar(); self.progress.setRange(0, 100)
         bl.addWidget(self.progress)
@@ -159,6 +174,8 @@ class BasePanel(QWidget):
         g = QGroupBox("Géométrie")
         gl = QVBoxLayout(g)
         self.cb_geom = QComboBox()
+        self.cb_geom.setToolTip(
+            "Choisissez une situation classique de cours prête à simuler.")
         self.cb_geom.addItems(self._scenarios_affiches(dom))
         self.cb_geom.currentTextChanged.connect(self._on_scenario_change)
         gl.addWidget(self.cb_geom)
@@ -170,6 +187,8 @@ class BasePanel(QWidget):
 
 
         self.spin_taille = make_double_spin(1.0, 0.001, 1000.0, decimals=3, step=0.1)
+        self.spin_taille.setToolTip(
+            "Longueur physique du côté du domaine, en mètres.")
         self._row(gl, "Taille du domaine (m)", self.spin_taille)
         self.spin_taille.valueChanged.connect(self._scene_2d_modifiee)
         c2d.addWidget(g)
@@ -187,6 +206,7 @@ class BasePanel(QWidget):
 
 
         s = QGroupBox("Avancé — solveur numérique")
+        self.groupe_solveur = s
         s.setCheckable(True)
         s.setChecked(False)
         sl = QVBoxLayout(s)
@@ -217,6 +237,7 @@ class BasePanel(QWidget):
         contenu_solveur.setVisible(False)
         s.toggled.connect(contenu_solveur.setVisible)
         c2d.addWidget(s)
+        self._declarer_niveau(s, "expert")
 
         layout.addWidget(self.conteneur_2d)
 
@@ -230,16 +251,17 @@ class BasePanel(QWidget):
             self.label_scalaire_3d = QLabel("Grandeur affichée")
             self.cb_scalaire_3d = QComboBox()
             self.cb_scalaire_3d.addItems(list(fem3d_render.SCALAIRES_3D))
-            self.cb_scalaire_3d.currentTextChanged.connect(
-                self._on_scalaire_3d_change)
+            self.cb_scalaire_3d.currentIndexChanged.connect(
+                lambda: self._on_scalaire_3d_change(
+                    self.cb_scalaire_3d.currentText()))
             vzl.addWidget(self.label_scalaire_3d)
             vzl.addWidget(self.cb_scalaire_3d)
             self.label_scalaire_3d.hide()
             self.cb_scalaire_3d.hide()
         vzl.addWidget(QLabel("Mode de rendu"))
         vzl.addWidget(self.cb_viz)
-        self.cb_viz.currentTextChanged.connect(
-            lambda kind: self.controller.refresh_plot(kind))
+        self.cb_viz.currentIndexChanged.connect(
+            lambda: self.controller.refresh_plot(self.cb_viz.currentText()))
         layout.addWidget(vz)
 
         layout.addStretch(1)
@@ -272,7 +294,8 @@ class BasePanel(QWidget):
             self.cb_regime_3d.hide()
         self.cb_dimension = QComboBox()
         self.cb_dimension.addItems(["2D", "3D"])
-        self.cb_dimension.currentTextChanged.connect(self._on_dimension_change)
+        self.cb_dimension.currentIndexChanged.connect(
+            lambda: self._on_dimension_change(self.cb_dimension.currentText()))
         dl.addWidget(self.cb_dimension)
         layout.addWidget(d)
 
@@ -295,14 +318,21 @@ class BasePanel(QWidget):
         self.spin_taille_3d.valueChanged.connect(
             self._taille_scenario_3d_changee)
         self.spin_N_3d = make_int_spin(16, minv=4, maxv=40)
-        self._row(g3l, "Résolution (par arête)", self.spin_N_3d)
+        self._row(
+            g3l, "Résolution (par arête)", self.spin_N_3d,
+            niveau="expert")
         c3.addWidget(g3)
         self._build_dynamique_3d(c3)
+        if self.controller.domaine.nom == "Thermique":
+            self._build_environnement_3d(c3)
         self.cb_geom_3d.currentTextChanged.connect(self._maj_dynamique_3d)
+        self._build_conditions_limites_3d(c3)
         self.editeur_scene_3d = SceneEditorPanel(
             self.controller.domaine.nom,
             callback_scene=self._scene_3d_modifiee)
         c3.addWidget(self.editeur_scene_3d)
+        self._declarer_niveau(self.editeur_scene_3d, "expert")
+        self._synchroniser_conditions_limites_3d()
         self.info_scenario_3d_verrouille = QLabel(
             "Scénario prédéfini : sa géométrie est définie par le modèle. "
             "Choisissez « Scène libre » pour ajouter, déplacer ou "
@@ -325,8 +355,8 @@ class BasePanel(QWidget):
         info.setStyleSheet("color: gray;")
         dl.addWidget(info)
         self.spin_T_initiale_3d = make_double_spin(0.0)
-        self.spin_duree_3d = make_double_spin(3.0, 0.001, 1.0e6,
-                                              decimals=3, step=0.5)
+        self.spin_duree_3d = make_double_spin(3600.0, 0.001, 1.0e10,
+                                              decimals=3, step=60.0)
         self.spin_n_images_3d = make_int_spin(30, minv=2, maxv=500)
         self.cb_forme_temporelle_3d = QComboBox()
         self.cb_forme_temporelle_3d.addItems(NOMS_FORMES)
@@ -350,8 +380,215 @@ class BasePanel(QWidget):
             rl.addWidget(widget)
             dl.addWidget(ligne)
             self._lignes_dynamique_3d[nom_param] = ligne
+            if nom_param in {"n_images", "forme", "frequence"}:
+                self._declarer_niveau(ligne, "expert")
         layout.addWidget(d)
         self._maj_dynamique_3d()
+
+    def _build_conditions_limites_3d(self, layout):
+        domaine_nom = self.controller.domaine.nom
+        conditions = conditions_limites_3d(domaine_nom)
+        self.groupe_parois_3d = None
+        if not conditions:
+            return
+
+        groupe = QGroupBox("Conditions aux limites du domaine 3D")
+        groupe.setCheckable(True)
+        groupe.setChecked(False)
+        self.groupe_parois_3d = groupe
+        groupe_layout = QVBoxLayout(groupe)
+        self.label_resume_parois_3d = QLabel()
+        self.label_resume_parois_3d.setWordWrap(True)
+        self.label_resume_parois_3d.setStyleSheet("color: #22c55e;")
+        groupe_layout.addWidget(self.label_resume_parois_3d)
+        aide = QLabel(aide_conditions_limites_3d(domaine_nom))
+        aide.setWordWrap(True)
+        aide.setStyleSheet("color: gray;")
+        groupe_layout.addWidget(aide)
+
+        self.contenu_parois_3d = QWidget()
+        contenu_layout = QVBoxLayout(self.contenu_parois_3d)
+        contenu_layout.setContentsMargins(0, 4, 0, 0)
+        self.wall3d_kind = {}
+        self.wall3d_p1 = {}
+        self.wall3d_p2 = {}
+        self.wall3d_lab1 = {}
+        self.wall3d_lab2 = {}
+        self.wall3d_ligne1 = {}
+        self.wall3d_ligne2 = {}
+        self._condition_precedente_3d = {}
+        self._valeurs_conditions_3d = {}
+
+        self._chargement_parois_3d = True
+        try:
+            for face, libelle_face in FACES_3D:
+                face_box = QGroupBox(libelle_face)
+                face_layout = QVBoxLayout(face_box)
+                ligne_condition = QHBoxLayout()
+                ligne_condition.addWidget(QLabel("Condition"))
+                cb = QComboBox()
+                cb.setMinimumContentsLength(22)
+                for condition in conditions:
+                    cb.addItem(
+                        libelle_condition_limite_3d(domaine_nom, condition),
+                        condition)
+                ligne_condition.addWidget(cb, stretch=1)
+                face_layout.addLayout(ligne_condition)
+
+                spin1 = make_double_spin(0.0)
+                spin2 = make_double_spin(0.0)
+                ligne1, label1 = self._ligne_parametre_paroi_3d(
+                    face_layout, spin1)
+                ligne2, label2 = self._ligne_parametre_paroi_3d(
+                    face_layout, spin2)
+                contenu_layout.addWidget(face_box)
+
+                self.wall3d_kind[face] = cb
+                self.wall3d_p1[face] = spin1
+                self.wall3d_p2[face] = spin2
+                self.wall3d_lab1[face] = label1
+                self.wall3d_lab2[face] = label2
+                self.wall3d_ligne1[face] = ligne1
+                self.wall3d_ligne2[face] = ligne2
+                condition_initiale = cb.currentData()
+                self._condition_precedente_3d[face] = condition_initiale
+                self._valeurs_conditions_3d[face] = {
+                    condition: defauts_condition_limite_3d(
+                        domaine_nom, condition)
+                    for condition in conditions
+                }
+                cb.currentIndexChanged.connect(
+                    lambda _index, f=face: self._maj_paroi_3d(f))
+                spin1.valueChanged.connect(
+                    self._conditions_limites_3d_modifiees)
+                spin2.valueChanged.connect(
+                    self._conditions_limites_3d_modifiees)
+                self._maj_paroi_3d(
+                    face, restaurer_valeurs=False, notifier=False)
+        finally:
+            self._chargement_parois_3d = False
+
+        groupe_layout.addWidget(self.contenu_parois_3d)
+        self.contenu_parois_3d.hide()
+        groupe.toggled.connect(self.contenu_parois_3d.setVisible)
+        layout.addWidget(groupe)
+        self._maj_resume_parois_3d()
+
+    @staticmethod
+    def _ligne_parametre_paroi_3d(layout, widget):
+        ligne = QWidget()
+        ligne_layout = QHBoxLayout(ligne)
+        ligne_layout.setContentsMargins(0, 0, 0, 0)
+        label = QLabel()
+        label.setWordWrap(True)
+        label.setMinimumWidth(145)
+        ligne_layout.addWidget(label)
+        widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        ligne_layout.addWidget(widget)
+        layout.addWidget(ligne)
+        return ligne, label
+
+    def _maj_paroi_3d(self, face, restaurer_valeurs=True, notifier=True):
+        if not hasattr(self, "wall3d_kind") or face not in self.wall3d_kind:
+            return
+        domaine_nom = self.controller.domaine.nom
+        condition = self.wall3d_kind[face].currentData()
+        precedente = self._condition_precedente_3d.get(face)
+        spin1, spin2 = self.wall3d_p1[face], self.wall3d_p2[face]
+        condition_changee = restaurer_valeurs and precedente != condition
+
+        if condition_changee and precedente:
+            self._valeurs_conditions_3d[face][precedente] = (
+                spin1.value(), spin2.value())
+        if domaine_nom == "Thermique" and condition in {"robin", "radiation"}:
+            spin1.setRange(0.0, 1.0 if condition == "radiation" else 1.0e6)
+            spin1.setSingleStep(0.05 if condition == "radiation" else 1.0)
+        else:
+            spin1.setRange(-1.0e6, 1.0e6)
+            spin1.setSingleStep(1.0)
+        if condition_changee:
+            valeur1, valeur2 = self._valeurs_conditions_3d[face].get(
+                condition,
+                defauts_condition_limite_3d(domaine_nom, condition))
+            for spin, valeur in ((spin1, valeur1), (spin2, valeur2)):
+                ancien_blocage = spin.blockSignals(True)
+                spin.setValue(float(valeur))
+                spin.blockSignals(ancien_blocage)
+        self._condition_precedente_3d[face] = condition
+
+        libelle1, libelle2 = libelles_parametres_condition_limite_3d(
+            domaine_nom, condition)
+        self.wall3d_lab1[face].setText(tr(libelle1 or ""))
+        self.wall3d_lab2[face].setText(tr(libelle2 or ""))
+        self.wall3d_ligne1[face].setVisible(libelle1 is not None)
+        self.wall3d_ligne2[face].setVisible(libelle2 is not None)
+        self._maj_resume_parois_3d()
+        if notifier:
+            self._conditions_limites_3d_modifiees()
+
+    def _maj_resume_parois_3d(self):
+        if not getattr(self, "groupe_parois_3d", None):
+            return
+        domaine_nom = self.controller.domaine.nom
+        comptes = {}
+        for cb in self.wall3d_kind.values():
+            condition = cb.currentData()
+            comptes[condition] = comptes.get(condition, 0) + 1
+        morceaux = [
+            f"{nombre} × {libelle_condition_limite_3d(domaine_nom, condition)}"
+            for condition, nombre in comptes.items()
+        ]
+        source = "Résumé : " + " · ".join(morceaux)
+        self.label_resume_parois_3d.setProperty("_i18n_source_text", source)
+        self.label_resume_parois_3d.setText(tr(source))
+        self._synchroniser_conditions_limites_3d()
+
+    def _conditions_limites_3d_productrices(self):
+        return (hasattr(self, "wall3d_kind")
+                and any(cb.currentData() != "neumann"
+                        for cb in self.wall3d_kind.values()))
+
+    def _conditions_limites_3d_ancrent_solution(self):
+        return (hasattr(self, "wall3d_kind")
+                and any(cb.currentData() in {
+                    "dirichlet", "robin", "radiation"}
+                    for cb in self.wall3d_kind.values()))
+
+    def _synchroniser_conditions_limites_3d(self):
+        editeur = getattr(self, "editeur_scene_3d", None)
+        if editeur is not None:
+            editeur.definir_conditions_limites(
+                self._conditions_limites_3d_productrices(),
+                self._conditions_limites_3d_ancrent_solution())
+
+    def _conditions_limites_3d_modifiees(self, *_args):
+        self._maj_resume_parois_3d()
+        if self._chargement_parois_3d:
+            return
+        if (not hasattr(self, "cb_dimension")
+                or self.cb_dimension.currentText() != "3D"
+                or not self._est_scene_libre()):
+            return
+        self.controller._generation += 1
+        self.controller.result = None
+        self.progress.setValue(0)
+        self._afficher_statut(
+            "Conditions aux limites modifiées — relancez la simulation.")
+
+    def _walls_3d(self):
+        parois = {}
+        for face, cb in getattr(self, "wall3d_kind", {}).items():
+            condition = cb.currentData()
+            valeur1 = float(self.wall3d_p1[face].value())
+            valeur2 = float(self.wall3d_p2[face].value())
+            if condition in {"dirichlet", "flux"}:
+                parois[face] = (condition, valeur1)
+            elif condition in {"robin", "radiation"}:
+                parois[face] = (condition, valeur1, valeur2)
+            else:
+                parois[face] = ("neumann",)
+        return parois
 
     def _maj_dynamique_3d(self, _nom=None):
         if not hasattr(self, "groupe_dynamique_3d"):
@@ -382,7 +619,8 @@ class BasePanel(QWidget):
                 self.controller._generation += 1
                 self.controller.result = None
                 self.progress.setValue(0)
-                self.status.setText("Scène modifiée — relancez la simulation.")
+                self._afficher_statut(
+                    "Scène modifiée — relancez la simulation.")
             self.controller.plot.afficher_scene_3d(
                 scene, index_selectionne,
                 self.editeur_scene_3d.selectionner_depuis_vue,
@@ -484,27 +722,88 @@ class BasePanel(QWidget):
 
     def _maj_disponibilite_edition_3d(self, _nom=None):
         libre = self._est_scene_libre()
+        edition_visible = libre and self._mode_interface == "expert"
         if hasattr(self, "editeur_scene_3d"):
-            self.editeur_scene_3d.setVisible(libre)
+            self.editeur_scene_3d.setVisible(edition_visible)
+        groupe_parois = getattr(self, "groupe_parois_3d", None)
+        if groupe_parois is not None:
+            groupe_parois.setVisible(edition_visible)
         if hasattr(self, "info_scenario_3d_verrouille"):
             self.info_scenario_3d_verrouille.setVisible(not libre)
+            if not libre:
+                from fieldlab.scenarios_pedagogiques import description_scenario
+                self.info_scenario_3d_verrouille.setText(
+                    description_scenario(self.cb_geom_3d.currentText()))
 
 
     def _scenarios_affiches(self, dom):
+        if self._mode_interface == "expert":
+            return list(dom.scenarios)
         essentiels = getattr(dom, "scenarios_essentiels", ()) or ()
         if essentiels:
-            resultat = ([NOM_SCENE_LIBRE_2D]
-                        if NOM_SCENE_LIBRE_2D in dom.scenarios else [])
-            resultat.extend(
-                n for n in essentiels
-                if n in dom.scenarios and n not in resultat)
-            return resultat
-        return list(dom.scenarios)
+            return [n for n in essentiels if n in dom.scenarios]
+        return [n for n in dom.scenarios if n != NOM_SCENE_LIBRE_2D]
+
+    def _recharger_scenarios_mode(self):
+        dom = self.controller.domaine
+        courant = self.cb_geom.currentText()
+        noms = self._scenarios_affiches(dom)
+        bloque = self.cb_geom.blockSignals(True)
+        self.cb_geom.clear()
+        self.cb_geom.addItems(noms)
+        if courant in noms:
+            self.cb_geom.setCurrentText(courant)
+        self.cb_geom.blockSignals(bloque)
+        if self.SUPPORTE_3D and hasattr(self, "cb_geom_3d"):
+            courant_3d = self.cb_geom_3d.currentText()
+            noms_3d = list(self.SCENARIOS_3D)
+            if self._mode_interface == "cours":
+                noms_3d = [n for n in noms_3d
+                           if not n.startswith(_PREFIXE_SCENE_LIBRE)]
+            bloque = self.cb_geom_3d.blockSignals(True)
+            self.cb_geom_3d.clear()
+            self.cb_geom_3d.addItems(noms_3d)
+            if courant_3d in noms_3d:
+                self.cb_geom_3d.setCurrentText(courant_3d)
+            self.cb_geom_3d.blockSignals(bloque)
+        self._on_scenario_change()
+        if self.SUPPORTE_3D:
+            self._maj_disponibilite_edition_3d()
+
+    def _declarer_niveau(self, widget, niveau):
+        widget.setProperty("niveau_interface", niveau)
+        if niveau == "expert" and widget not in self._widgets_experts:
+            self._widgets_experts.append(widget)
+        return widget
+
+    def set_mode_interface(self, mode):
+        """Applique un niveau de visibilité sans dupliquer les paramètres."""
+
+        if mode not in {"cours", "expert"}:
+            raise ValueError(f"Mode d'interface inconnu : {mode!r}")
+        changement = mode != self._mode_interface
+        self._mode_interface = mode
+        if mode == "cours":
+            self.cb_meth.setCurrentText("FEM (direct)")
+            self.spin_N.setValue(100)
+            self.spin_N_3d.setValue(14) if hasattr(self, "spin_N_3d") else None
+            self.spin_refine.setValue(0)
+            self.edit_tol.setText("1e-5")
+        for widget in self._widgets_experts:
+            widget.setVisible(mode == "expert")
+        if changement:
+            self._recharger_scenarios_mode()
+        self._maj_disponibilite_edition_2d()
+        if self.SUPPORTE_3D:
+            self._maj_disponibilite_edition_3d()
+        source = "Simuler" if mode == "cours" else "Lancer la simulation"
+        self.run_btn.setProperty("_i18n_source_text", source)
+        self.run_btn.setText(tr(source))
 
     def _build_domain_params(self, layout, dom):
         p = QGroupBox("Paramètres")
         pl = QVBoxLayout(p)
-        self._row(pl, "Résolution N", self.spin_N)
+        self._row(pl, "Résolution N", self.spin_N, niveau="expert")
         layout.addWidget(p)
 
     def _build_sources_obstacles(self, layout, dom):
@@ -519,6 +818,7 @@ class BasePanel(QWidget):
             self._parois_scene_libre_2d = copy.deepcopy(self._walls())
         self._chargement_scene_2d = True
         try:
+            self._appliquer_preset_scenario_2d(nouveau)
             if (nouveau == NOM_SCENE_LIBRE_2D
                     and self._parois_scene_libre_2d is not None):
                 self._appliquer_parois_2d(self._parois_scene_libre_2d)
@@ -530,6 +830,38 @@ class BasePanel(QWidget):
         self._maj_disponibilite_edition_2d()
         self._maj_validite()
         self._scene_2d_modifiee()
+
+    def _appliquer_preset_scenario_2d(self, scenario):
+        if self._mode_interface != "cours":
+            return
+        from fieldlab.scenarios_pedagogiques import preset_2d
+
+        preset = preset_2d(self.controller.domaine.nom, scenario)
+        if not preset:
+            return
+        if "taille" in preset:
+            self.spin_taille.setValue(float(preset["taille"]))
+        for nom_widget in ("spin_v", "spin_J", "spin_T_chaud"):
+            widget = getattr(self, nom_widget, None)
+            if widget is not None and "valeur" in preset:
+                widget.setValue(float(preset["valeur"]))
+        environnement = getattr(self, "cb_environnement", None)
+        if environnement is not None and "environnement" in preset:
+            environnement.setCurrentText(str(preset["environnement"]))
+        if "viz" in preset and self.cb_viz.findText(preset["viz"]) >= 0:
+            self.cb_viz.setCurrentText(preset["viz"])
+        if hasattr(self, "cb_regime") and "regime" in preset:
+            self.cb_regime.setCurrentText(str(preset["regime"]))
+        if hasattr(self, "spin_T_initiale") and "T_initiale" in preset:
+            self.spin_T_initiale.setValue(float(preset["T_initiale"]))
+        if hasattr(self, "spin_duree") and "duree" in preset:
+            self.spin_duree.setValue(float(preset["duree"]))
+        if (hasattr(self, "cb_vitesse_lecture")
+                and "vitesse_lecture" in preset):
+            index = self.cb_vitesse_lecture.findData(
+                int(preset["vitesse_lecture"]))
+            if index >= 0:
+                self.cb_vitesse_lecture.setCurrentIndex(index)
 
     def _appliquer_parois_2d(self, parois):
         for cote in COTES:
@@ -559,7 +891,7 @@ class BasePanel(QWidget):
         if groupe_solaire is not None:
             groupes.append(groupe_solaire)
         for groupe in groupes:
-            groupe.setVisible(libre)
+            groupe.setVisible(libre and self._mode_interface == "expert")
         for bouton in self._boutons_placement_2d:
             if not libre and bouton.isChecked():
                 bouton.setChecked(False)
@@ -569,10 +901,10 @@ class BasePanel(QWidget):
                 "aux limites, puis placez-les au clic dans l’aperçu.")
             self.info_scenario_2d.setStyleSheet("color: #22c55e;")
         else:
+            from fieldlab.scenarios_pedagogiques import description_scenario
             self.info_scenario_2d.setText(
-                "Géométrie prédéfinie verrouillée. Choisissez « Scène libre » "
-                "pour construire votre propre environnement 2D.")
-            self.info_scenario_2d.setStyleSheet("color: #f59e0b;")
+                description_scenario(self.cb_geom.currentText()))
+            self.info_scenario_2d.setStyleSheet("color: #22c55e;")
 
     def _scene_2d_modifiee(self, *_args):
         if self._chargement_scene_2d:
@@ -589,13 +921,15 @@ class BasePanel(QWidget):
                 p["obstacles"], q=p.get("q"),
                 kappa_fond=p.get("kappa_fond", 1.0),
                 taille_domaine=p.get("taille_domaine", 1.0),
-                rho_cp_fond=p.get("rho_cp_fond", 1.0))
+                rho_cp_fond=p.get("rho_cp_fond", 1.0),
+                facteur_source=p.get("facteur_source", 1.0))
         except (KeyError, TypeError, ValueError):
             return
         self.controller._generation += 1
         self.controller.result = None
         self.progress.setValue(0)
-        self.status.setText("Environnement modifié — relancez la simulation.")
+        self._afficher_statut(
+            "Environnement modifié — relancez la simulation.")
         plot.afficher_scene_2d(champ, p["geom"])
 
     def _maj_validite(self, *_args):
@@ -636,7 +970,8 @@ class BasePanel(QWidget):
             else:
                 commun += [
                     "Coupe 2D supposée infinie dans la direction hors plan ; "
-                    "A_z et B sont affichés en unités relatives.",
+                    "J_z est en A/m², A_z en T·m et B en teslas ; le facteur "
+                    "μ₀ est inclus dans l'équation.",
                     "Matériaux magnétiques linéaires : saturation, hystérésis et "
                     "courants de Foucault non modélisés.",
                 ]
@@ -651,7 +986,15 @@ class BasePanel(QWidget):
                 commun.append(
                     "Le transitoire utilise ρ·cp et un schéma implicite ; le pas "
                     "de temps influence la précision, même si le schéma reste stable.")
-        self.label_validite.setText("\n• " + "\n• ".join(commun))
+        premiere_traduite = (
+            f"{tr('Modèle')} : {dimension}, {tr('régime')} "
+            f"{tr(regime).lower()}, {tr('scénario')} « {tr(scenario)} ».")
+        texte_source = "\n• " + "\n• ".join(commun)
+        lignes_traduites = [premiere_traduite]
+        lignes_traduites.extend(tr(ligne) for ligne in commun[1:])
+        self.label_validite.setProperty("_i18n_source_text", texte_source)
+        self.label_validite.setText(
+            "\n• " + "\n• ".join(lignes_traduites))
 
     def _charger_parois(self):
         pass
@@ -668,24 +1011,32 @@ class BasePanel(QWidget):
                     spin_y.setValue(round(y, 3))
                     ajouter_fn()
                 self.controller.plot.activer_placement_2d(cb)
-                btn.setText("Placement actif — cliquez sur la carte")
+                btn.setText(tr("Placement actif — cliquez sur la carte"))
             else:
                 self.controller.plot.activer_placement_2d(None)
-                btn.setText("Placer au clic sur la carte")
+                btn.setText(tr("Placer au clic sur la carte"))
 
         btn.toggled.connect(_basculer)
         layout.addWidget(btn)
         self._boutons_placement_2d.append(btn)
         return btn
 
-    def _row(self, layout, label, widget):
-        r = QHBoxLayout()
+    def _afficher_statut(self, texte):
+        self.status.setProperty("_i18n_source_text", texte)
+        self.status.setText(tr(texte))
+
+    def _row(self, layout, label, widget, niveau="cours"):
+        ligne = QWidget()
+        r = QHBoxLayout(ligne)
+        r.setContentsMargins(0, 0, 0, 0)
         lab = QLabel(label)
         lab.setMinimumWidth(90)
         r.addWidget(lab)
         widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         r.addWidget(widget)
-        layout.addLayout(r)
+        layout.addWidget(ligne)
+        self._declarer_niveau(ligne, niveau)
+        return ligne
 
     def _omega_opt(self):
         self.spin_omega.setValue(round(omega_optimal(self.spin_N.value()), 3))
@@ -720,17 +1071,44 @@ class BasePanel(QWidget):
         el.addWidget(info)
         self.cb_environnement = QComboBox()
         self.cb_environnement.addItems(["(aucun, vide normalise)"] + NOMS_ENVIRONNEMENTS)
-        self.cb_environnement.currentTextChanged.connect(self._appliquer_environnement)
+        self.cb_environnement.currentIndexChanged.connect(
+            lambda: self._appliquer_environnement(
+                self.cb_environnement.currentText()))
         self.cb_environnement.currentTextChanged.connect(
             self._scene_2d_modifiee)
         el.addWidget(self.cb_environnement)
         layout.addWidget(e)
 
+    def _build_environnement_3d(self, layout):
+        """Expose le milieu de fond en 3D thermique, où le panneau 2D est caché."""
+
+        from fieldlab.environments import NOMS_ENVIRONNEMENTS
+        e = QGroupBox("Milieu physique 3D")
+        el = QVBoxLayout(e)
+        info = QLabel(
+            "Matériau qui remplit le volume hors objets. Il fixe κ et ρ·cp, "
+            "donc l'échelle de temps physique du transitoire.")
+        info.setWordWrap(True)
+        info.setStyleSheet("color: gray;")
+        el.addWidget(info)
+        self.cb_environnement_3d = QComboBox()
+        self.cb_environnement_3d.addItems(
+            ["(aucun, vide normalise)"] + NOMS_ENVIRONNEMENTS)
+        el.addWidget(self.cb_environnement_3d)
+        layout.addWidget(e)
+
     def _appliquer_environnement(self, _nom):
         pass
 
+    def _combo_environnement_actif(self):
+        if (hasattr(self, "cb_dimension")
+                and self.cb_dimension.currentText() == "3D"
+                and hasattr(self, "cb_environnement_3d")):
+            return self.cb_environnement_3d
+        return getattr(self, "cb_environnement", None)
+
     def _kappa_fond(self):
-        cb = getattr(self, "cb_environnement", None)
+        cb = self._combo_environnement_actif()
         if cb is None or cb.currentText().startswith("(aucun"):
             return 1.0
         from fieldlab.environments import ENVIRONNEMENTS
@@ -739,7 +1117,7 @@ class BasePanel(QWidget):
         return kappa_pour_domaine(MATERIAUX[env.materiau_fond], self.controller.domaine.nom)
 
     def _rho_cp_fond(self):
-        cb = getattr(self, "cb_environnement", None)
+        cb = self._combo_environnement_actif()
         if cb is None or cb.currentText().startswith("(aucun"):
             return 1.0
         from fieldlab.environments import ENVIRONNEMENTS
@@ -771,6 +1149,7 @@ class BasePanel(QWidget):
         self.spin_n_images_var = make_int_spin(60, minv=2, maxv=500)
         self._row(rl, "Images", self.spin_n_images_var)
         layout.addWidget(r)
+        self._declarer_niveau(r, "expert")
 
     def _contribute_regime_variable(self, d):
         d["regime"] = self.cb_regime.currentText()
@@ -799,6 +1178,9 @@ class BasePanel(QWidget):
             "kappa_fond": self._kappa_fond(),
             "taille_domaine": float(self.spin_taille.value()),
         }
+        from fieldlab.constantes import facteur_source_poisson
+        d["facteur_source"] = facteur_source_poisson(
+            self.controller.domaine.nom)
         d["dimension"] = "2D"
         if self.SUPPORTE_3D and self.cb_dimension.currentText() == "3D":
             d["dimension"] = "3D"
@@ -808,6 +1190,8 @@ class BasePanel(QWidget):
             d["regime_3d"] = self.cb_regime_3d.currentText()
             if self._est_scene_libre():
                 d["scene_3d"] = self.editeur_scene_3d.scene
+                if getattr(self, "groupe_parois_3d", None) is not None:
+                    d["walls_3d"] = self._walls_3d()
 
 
 
@@ -820,9 +1204,46 @@ class BasePanel(QWidget):
             if self._scenario_3d_accepte("taille_m"):
                 d["taille_m_3d"] = float(self.spin_taille_3d.value())
         self.contribute_params(d)
+        environnement = self._combo_environnement_actif()
+        d["environnement"] = (environnement.currentText()
+                                if environnement is not None else "")
         if d["dimension"] == "2D" and not self._est_scene_libre_2d():
             d["obstacles"] = []
         return d
+
+    def _lancer_simulation(self):
+        if (not self.SUPPORTE_3D
+                or self.cb_dimension.currentText() != "3D"
+                or not self._est_scene_libre()):
+            self.controller.run_simulation()
+            return
+
+        editeur = self.editeur_scene_3d
+        produit_un_champ, message = editeur.scene_produit_un_champ()
+        if produit_un_champ:
+            if (self.controller.domaine.nom != "Magnetostatique"
+                    and not editeur.scene_a_une_reference()):
+                QMessageBox.warning(
+                    self, tr("Référence physique manquante"),
+                    tr(editeur.message_reference_manquante()))
+                return
+            self.controller.run_simulation()
+            return
+
+        scene_vide = not editeur.scene.items and not editeur.scene.circuits
+        if scene_vide:
+            QMessageBox.warning(
+                self, tr("Scène 3D vide"),
+                tr(message + "\n\nAjoutez au moins un élément physique avant de lancer."))
+            return
+
+        reponse = QMessageBox.question(
+            self, tr("Champ trivial attendu"),
+            tr(message + "\n\nLancer quand même ?"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if reponse == QMessageBox.StandardButton.Yes:
+            self.controller.run_simulation()
 
     def set_running(self, running):
         self.run_btn.setEnabled(not running)
@@ -837,7 +1258,11 @@ class BasePanel(QWidget):
 
         def valeur(widget):
             if isinstance(widget, QComboBox):
-                return {"type": "combo", "value": widget.currentText()}
+                return {
+                    "type": "combo",
+                    "value": widget.currentText(),
+                    "data": widget.currentData(),
+                }
             if isinstance(widget, (QDoubleSpinBox, QSpinBox)):
                 return {"type": "number", "value": widget.value()}
             if isinstance(widget, QLineEdit):
@@ -879,7 +1304,11 @@ class BasePanel(QWidget):
             try:
                 valeur = donnees.get("value")
                 if isinstance(widget, QComboBox):
-                    index = widget.findText(str(valeur))
+                    donnee_interne = donnees.get("data", valeur)
+                    index = (widget.findData(donnee_interne)
+                             if donnee_interne is not None else -1)
+                    if index < 0:
+                        index = widget.findText(str(valeur))
                     if index >= 0:
                         widget.setCurrentIndex(index)
                 elif isinstance(widget, QDoubleSpinBox):
@@ -902,6 +1331,15 @@ class BasePanel(QWidget):
                             appliquer(objet[cle], etat)
             else:
                 appliquer(objet, donnees)
+        if hasattr(self, "wall3d_kind"):
+            self._chargement_parois_3d = True
+            try:
+                for face in self.wall3d_kind:
+                    self._maj_paroi_3d(
+                        face, restaurer_valeurs=False, notifier=False)
+            finally:
+                self._chargement_parois_3d = False
+            self._maj_resume_parois_3d()
         scene_2d = configuration.get("scene_2d") or {}
         self._parois_scene_libre_2d = copy.deepcopy(
             scene_2d.get("parois_libres"))

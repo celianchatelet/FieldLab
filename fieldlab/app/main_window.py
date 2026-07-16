@@ -2,16 +2,18 @@ import sys
 import json
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, Qt
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QEvent, QObject, QSettings, Qt
+from PySide6.QtGui import QAction, QActionGroup, QIcon
 from PySide6.QtWidgets import (
     QAbstractSpinBox, QApplication, QComboBox, QDockWidget, QFileDialog,
-    QMainWindow, QMessageBox, QStackedWidget, QTabWidget,
+    QLabel, QMainWindow, QMessageBox, QStackedWidget, QTabWidget,
 )
 
 from fieldlab.domaines import DOMAINES
 from fieldlab.app import theme
 from fieldlab.app.domain_controller import DomainController
+from fieldlab.i18n import definir_langue, tr, traduire_interface
+from fieldlab.ressources import chemin_ressource
 
 
 class _FiltreMolette(QObject):
@@ -27,6 +29,9 @@ class FieldLabApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self._filtre_molette = _FiltreMolette(self)
+        self.settings = QSettings("FieldLab", "FieldLab")
+        self._langue = str(self.settings.value("interface/langue", "fr"))
+        definir_langue(self._langue)
         QApplication.instance().installEventFilter(self._filtre_molette)
         self.setWindowTitle("FieldLab — Simulateur multiphysique 2D/3D")
         self.resize(1180, 760)
@@ -59,9 +64,14 @@ class FieldLabApp(QMainWindow):
         self.tabs.currentChanged.connect(self.controls_stack.setCurrentIndex)
 
         self._build_menu()
-
-
-        self.act_theme.setChecked(True)
+        mode_initial = str(self.settings.value(
+            "interface/mode", "cours"))
+        self.act_mode_expert.setChecked(mode_initial == "expert")
+        self._basculer_mode_expert(mode_initial == "expert")
+        self.act_theme.setChecked(
+            str(self.settings.value("interface/theme_sombre", "true")).lower()
+            in {"1", "true", "yes"})
+        self._changer_langue(self._langue)
 
     def _active_controller(self):
         index = self.tabs.currentIndex()
@@ -73,8 +83,8 @@ class FieldLabApp(QMainWindow):
         controller = self._active_controller()
         if controller is None:
             QMessageBox.information(
-                self, "Export indisponible",
-                "Aucun export disponible pour cet onglet.")
+                self, tr("Export indisponible"),
+                tr("Aucun export disponible pour cet onglet."))
             return
         getattr(controller, methode)(self)
 
@@ -116,11 +126,36 @@ class FieldLabApp(QMainWindow):
         act_dock = self.controls_dock.toggleViewAction()
         act_dock.setText("Panneau Contrôles")
         m_affichage.addAction(act_dock)
-        self.act_mode_cours = QAction("Mode cours plein écran", self)
-        self.act_mode_cours.setCheckable(True)
-        self.act_mode_cours.setShortcut("F11")
-        self.act_mode_cours.toggled.connect(self._basculer_mode_cours)
-        m_affichage.addAction(self.act_mode_cours)
+        self.act_mode_expert = QAction("Mode Expert", self)
+        self.act_mode_expert.setCheckable(True)
+        self.act_mode_expert.toggled.connect(self._basculer_mode_expert)
+        m_affichage.addAction(self.act_mode_expert)
+        self.act_presentation = QAction("Présentation plein écran", self)
+        self.act_presentation.setCheckable(True)
+        self.act_presentation.setShortcut("F11")
+        self.act_presentation.toggled.connect(self._basculer_presentation)
+        m_affichage.addAction(self.act_presentation)
+
+        m_langue = bar.addMenu("Langue / Language")
+        groupe_langue = QActionGroup(self)
+        groupe_langue.setExclusive(True)
+        self.act_langue_fr = QAction("Français", self, checkable=True)
+        self.act_langue_en = QAction("Anglais", self, checkable=True)
+        groupe_langue.addAction(self.act_langue_fr)
+        groupe_langue.addAction(self.act_langue_en)
+        self.act_langue_fr.triggered.connect(
+            lambda: self._changer_langue("fr"))
+        self.act_langue_en.triggered.connect(
+            lambda: self._changer_langue("en"))
+        m_langue.addActions(groupe_langue.actions())
+        self._groupe_langue = groupe_langue
+
+        barre_mode = self.addToolBar("Mode d'interface")
+        barre_mode.setObjectName("barre_mode_interface")
+        self.label_mode_interface = QLabel("Mode : Cours")
+        barre_mode.addWidget(self.label_mode_interface)
+        barre_mode.addSeparator()
+        barre_mode.addAction(self.act_mode_expert)
 
         m_analyse = bar.addMenu("&Analyse")
         act_indicateurs = QAction("Indicateurs physiques...", self)
@@ -146,8 +181,8 @@ class FieldLabApp(QMainWindow):
 
     def sauvegarder_projet(self):
         chemin, _ = QFileDialog.getSaveFileName(
-            self, "Sauvegarder le projet", "",
-            "Projet FieldLab (*.fieldlab.json);;JSON (*.json)")
+            self, tr("Sauvegarder le projet"), "",
+            tr("Projet FieldLab (*.fieldlab.json);;JSON (*.json)"))
         if not chemin:
             return
         if not chemin.lower().endswith(".json"):
@@ -156,6 +191,8 @@ class FieldLabApp(QMainWindow):
             "format": "fieldlab-project",
             "version": 1,
             "theme_sombre": bool(self.act_theme.isChecked()),
+            "mode_interface": (
+                "expert" if self.act_mode_expert.isChecked() else "cours"),
             "onglet_actif": int(self.tabs.currentIndex()),
             "domaines": {
                 nom: controleur.panel.exporter_configuration()
@@ -167,15 +204,15 @@ class FieldLabApp(QMainWindow):
                 json.dumps(projet, ensure_ascii=False, indent=2),
                 encoding="utf-8")
             self.statusBar().showMessage(
-                f"Projet sauvegardé : {chemin}", 6000)
+                tr(f"Projet sauvegardé : {chemin}"), 6000)
         except (OSError, TypeError, ValueError) as erreur:
             QMessageBox.critical(
-                self, "Sauvegarde impossible", str(erreur))
+                self, tr("Sauvegarde impossible"), tr(str(erreur)))
 
     def ouvrir_projet(self):
         chemin, _ = QFileDialog.getOpenFileName(
-            self, "Ouvrir un projet", "",
-            "Projet FieldLab (*.fieldlab.json *.json);;JSON (*.json)")
+            self, tr("Ouvrir un projet"), "",
+            tr("Projet FieldLab (*.fieldlab.json *.json);;JSON (*.json)"))
         if not chemin:
             return
         try:
@@ -199,13 +236,42 @@ class FieldLabApp(QMainWindow):
                        self.tabs.count() - 1)))
             self.act_theme.setChecked(
                 bool(projet.get("theme_sombre", True)))
+            self.act_mode_expert.setChecked(
+                projet.get("mode_interface", "cours") == "expert")
             self.statusBar().showMessage(
-                f"Projet chargé : {chemin} — relancez les simulations.", 7000)
+                tr(f"Projet chargé : {chemin} — relancez les simulations."),
+                7000)
         except (OSError, json.JSONDecodeError, TypeError, ValueError) as erreur:
             QMessageBox.critical(
-                self, "Ouverture impossible", str(erreur))
+                self, tr("Ouverture impossible"), tr(str(erreur)))
 
-    def _basculer_mode_cours(self, actif):
+    def _basculer_mode_expert(self, actif):
+        mode = "expert" if actif else "cours"
+        self.settings.setValue("interface/mode", mode)
+        if hasattr(self, "label_mode_interface"):
+            source = "Mode : Expert" if actif else "Mode : Cours"
+            self.label_mode_interface.setProperty("_i18n_source_text", source)
+            self.label_mode_interface.setText(tr(source))
+        for controller in self._controllers_ordre:
+            controller.panel.set_mode_interface(mode)
+        self.controls_dock.show()
+
+    def _changer_langue(self, langue):
+        """Retraduit l'interface sans changer les identifiants des modèles."""
+
+        self._langue = langue
+        definir_langue(langue)
+        self.settings.setValue("interface/langue", langue)
+        self.act_langue_fr.setChecked(langue == "fr")
+        self.act_langue_en.setChecked(langue == "en")
+        traduire_interface(self)
+        for controller in self._controllers_ordre:
+            controller.panel._maj_disponibilite_edition_2d()
+            controller.panel._maj_validite()
+            if controller.panel.SUPPORTE_3D:
+                controller.panel._maj_disponibilite_edition_3d()
+
+    def _basculer_presentation(self, actif):
         if actif:
             self._dock_visible_avant_cours = self.controls_dock.isVisible()
             self.controls_dock.hide()
@@ -226,6 +292,7 @@ class FieldLabApp(QMainWindow):
         self.controls_dock.show()
 
     def _toggle_theme(self, dark):
+        self.settings.setValue("interface/theme_sombre", bool(dark))
         theme.apply_theme(QApplication.instance(), dark)
         for controller in self._controllers_ordre:
             controller._annulation.set()
@@ -243,8 +310,7 @@ class FieldLabApp(QMainWindow):
         super().closeEvent(event)
 
     def _about(self):
-        QMessageBox.information(
-            self, "À propos",
+        texte = (
             "FieldLab — Simulateur multiphysique 2D/3D\n\n"
             "Champs électriques, magnétiques et thermiques :\n"
             "équations de Laplace/Poisson en 2D (différences finies et FEM)\n"
@@ -252,13 +318,14 @@ class FieldLabApp(QMainWindow):
             "et transitoire, obstacles et matériaux réels.\n\n"
             "Un onglet par domaine, panneau de contrôle dockable,\n"
             "bascule 2D/3D dans chaque panneau.")
+        QMessageBox.information(
+            self, tr("À propos"), tr(texte))
 
 
 def run():
     app = QApplication(sys.argv)
-
-
-
+    app.setWindowIcon(QIcon(str(chemin_ressource(
+        "assets", "fieldlab_icon.png"))))
     theme.apply_theme(app, dark=True)
     window = FieldLabApp()
     window.show()

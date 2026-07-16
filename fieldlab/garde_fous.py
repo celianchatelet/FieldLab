@@ -113,10 +113,18 @@ def verifier_parametres(p: dict, domaine_nom: str) -> tuple:
             elif spec[0] == "robin" and float(spec[1]) < 0:
                 bloquants.append(
                     "Le coefficient de convection h doit être positif ou nul.")
-        if str(p.get("regime", "")).lower() == "transitoire" \
-                and float(p.get("rho_cp_fond", 1.0)) == 1.0:
-            avertissements.append(
-                "Aucun milieu physique n'est sélectionné : ρ·cp = 1 est une "
-                "normalisation et l'échelle de temps ne représente pas des secondes réelles.")
+        regime_thermique = (p.get("regime_3d") if dimension == "3D"
+                            else p.get("regime"))
+        if str(regime_thermique or "").lower() == "transitoire":
+            environnement = str(p.get("environnement", ""))
+            rho_cp_fond = float(p.get("rho_cp_fond", 1.0))
+            if (not environnement
+                    or environnement.startswith("(aucun")
+                    or np.isclose(rho_cp_fond, 1.0)):
+                bloquants.append(
+                    "Un milieu physique réel est obligatoire en thermique "
+                    "transitoire. Sélectionnez Eau, Huile, Air ou un autre "
+                    "environnement : ρ·cp = 1 est une normalisation et ne "
+                    "représente pas une échelle de temps en secondes.")
 
     return bloquants, avertissements

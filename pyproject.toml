@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fieldlab"
-version = "0.2.0"
+version = "2.0.0"
 description = "Laboratoire pédagogique multiphysique 2D/3D interactif"
 requires-python = ">=3.10"
 dependencies = [
@@ -22,8 +22,19 @@ dependencies = [
     "meshio>=5.3",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pyinstaller>=6.10",
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
 [project.scripts]
 fieldlab = "fieldlab.app.main_window:run"
 
 [tool.setuptools.packages.find]
 include = ["fieldlab*"]
+
+[tool.pytest.ini_options]
+addopts = "--basetemp=.pytest-tmp"
+testpaths = ["tests"]

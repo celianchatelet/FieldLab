@@ -14,6 +14,8 @@ from fieldlab.app.panels.electrostatique import ElectrostatiquePanel
 from fieldlab.app.panels.magneto import MagnetoPanel
 from fieldlab.app.panels.thermique import ThermiquePanel
 from fieldlab.app.plot_panel import PlotPanel
+from fieldlab.i18n import tr
+from fieldlab.unites import format_duree, pas_temps_implicite
 
 
 _PANEL_CLS = {
@@ -46,18 +48,29 @@ class DomainController(QObject):
         panel_cls = _PANEL_CLS.get(domaine.nom, ElectrostatiquePanel)
         self.panel = panel_cls(controller=self)
         self.plot = PlotPanel(domaine)
+        self.plot.btn_export_image.clicked.connect(
+            lambda: self.export_png(self.panel))
+        self.plot.btn_export_animation.clicked.connect(
+            lambda: self.export_video(self.panel))
+        if hasattr(self.panel, "connecter_lecteur"):
+            self.panel.connecter_lecteur(self.plot)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._poll)
         self._timer.start(100)
         self.panel._scene_2d_modifiee()
-        self.panel.status.setText("Prêt — définissez la scène puis lancez la simulation.")
+        self._set_status("Prêt — définissez la scène puis lancez la simulation.")
+
+    def _set_status(self, texte):
+        self.panel.status.setProperty("_i18n_source_text", texte)
+        self.panel.status.setText(tr(texte))
 
     def run_simulation(self):
         try:
             p = self.panel.read_params()
         except ValueError as e:
-            QMessageBox.critical(self.panel, "Paramètres invalides", str(e))
+            QMessageBox.critical(
+                self.panel, tr("Paramètres invalides"), tr(str(e)))
             return
 
 
@@ -65,13 +78,13 @@ class DomainController(QObject):
         bloquants, avertissements = verifier_parametres(p, self.domaine.nom)
         if bloquants:
             QMessageBox.critical(
-                self.panel, "Paramètres incompatibles",
-                "\n\n".join(bloquants))
+                self.panel, tr("Paramètres incompatibles"),
+                tr("\n\n".join(bloquants)))
             return
         if avertissements:
             reponse = QMessageBox.question(
-                self.panel, "Calcul potentiellement lourd",
-                "\n\n".join(avertissements) + "\n\nLancer quand même ?",
+                self.panel, tr("Calcul potentiellement lourd"),
+                tr("\n\n".join(avertissements) + "\n\nLancer quand même ?"),
                 QMessageBox.StandardButton.Yes
                 | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No)
@@ -90,7 +103,8 @@ class DomainController(QObject):
                 preparation = self._preparer_construction_3d(
                     p, annule=annulation.is_set)
             except Exception as e:
-                QMessageBox.critical(self.panel, "Erreur de simulation", str(e))
+                QMessageBox.critical(
+                    self.panel, tr("Erreur de simulation"), tr(str(e)))
                 return
             differable = (
                 self.domaine.nom == "Magnetostatique"
@@ -125,10 +139,11 @@ class DomainController(QObject):
                 try:
                     champ0_3d = self._construire_champ0_3d(preparation, p)
                 except Exception as e:
-                    QMessageBox.critical(self.panel, "Erreur de simulation", str(e))
+                    QMessageBox.critical(
+                        self.panel, tr("Erreur de simulation"), tr(str(e)))
                     return
         self.panel.set_running(True)
-        self.panel.status.setText("Calcul en cours...")
+        self._set_status("Calcul en cours...")
         self.panel.progress.setValue(0)
         self._generation += 1
         self._derniers_parametres = copy.deepcopy(p)
@@ -171,8 +186,8 @@ class DomainController(QObject):
             "frequence": p.get("frequence_3d"),
         }
         if dynamiques["duree"] and dynamiques["n_images"]:
-            dynamiques["dt"] = (float(dynamiques["duree"])
-                                / max(1, int(dynamiques["n_images"]) * 5))
+            dynamiques["dt"], _n_pas = pas_temps_implicite(
+                dynamiques["duree"], dynamiques["n_images"])
         for nom, valeur in dynamiques.items():
             if valeur is None or not self.panel._scenario_3d_accepte(nom):
                 continue
@@ -190,7 +205,41 @@ class DomainController(QObject):
     def _construire_champ0_3d(self, preparation, p):
         construire, kwargs_3d, accepte_scene = preparation
         champ0 = construire(**kwargs_3d)
+        from fieldlab.fem3d.field3d import Field3D
+        if isinstance(champ0, Field3D):
+            champ0.facteur_source = float(p.get("facteur_source", 1.0))
+        if (self.domaine.nom == "Thermique"
+                and p.get("regime_3d") == "Transitoire"):
+            self._appliquer_milieu_transitoire_3d(champ0, p)
         return champ0
+
+    @staticmethod
+    def _appliquer_milieu_transitoire_3d(champ, p):
+        """Remplace le fond normalisé/précédent par le milieu SI sélectionné."""
+
+        from fieldlab.fem3d.field3d import Field3D
+        from fieldlab.materials import MATERIAUX
+
+        if not isinstance(champ, Field3D):
+            return
+        kappa_nouvelle = float(p["kappa_fond"])
+        rho_cp_nouveau = float(p["rho_cp_fond"])
+        masque_fond = np.isclose(champ.rho_cp, 1.0)
+        scene = getattr(champ, "scene", None)
+        ancien_nom = getattr(scene, "materiau_ambiant", None)
+        if ancien_nom in MATERIAUX:
+            ancien = MATERIAUX[ancien_nom]
+            masque_fond |= (
+                np.isclose(champ.rho_cp, ancien.rho_cp)
+                & np.isclose(champ.kappa, ancien.kappa_thermique))
+        champ.kappa[masque_fond] = kappa_nouvelle
+        champ.rho_cp[masque_fond] = rho_cp_nouveau
+        if scene is not None:
+            environnement = str(p.get("environnement", ""))
+            from fieldlab.environments import ENVIRONNEMENTS
+            if environnement in ENVIRONNEMENTS:
+                scene.materiau_ambiant = \
+                    ENVIRONNEMENTS[environnement].materiau_fond
 
     def _worker(self, p, gen, champ0_3d=None, constructeur_3d=None,
                 annulation=None):
@@ -234,6 +283,7 @@ class DomainController(QObject):
                     p["method"], p["omega"], p["tol"], p["max_iter"], p.get("refine", 0),
                     p["duree"], n_images, kappa_fond=p.get("kappa_fond", 1.0),
                     taille_domaine=p.get("taille_domaine", 1.0), progress=prog,
+                    facteur_source=p.get("facteur_source", 1.0),
                     annule=annule)
             else:
                 q = p.get("q")
@@ -241,7 +291,8 @@ class DomainController(QObject):
                                    p["walls"], p["obstacles"], q=q,
                                    kappa_fond=p.get("kappa_fond", 1.0),
                                    taille_domaine=p.get("taille_domaine", 1.0),
-                                   rho_cp_fond=p.get("rho_cp_fond", 1.0))
+                                   rho_cp_fond=p.get("rho_cp_fond", 1.0),
+                                   facteur_source=p.get("facteur_source", 1.0))
 
                 if regime == "Transitoire":
 
@@ -249,8 +300,8 @@ class DomainController(QObject):
                     from fieldlab.fem.transient import resoudre_transitoire
                     n_images = p["n_images"]
                     duree = p["duree"]
-                    dt = duree / max(1, n_images * 5)
-                    n_pas_estime = max(1, round(duree / dt))
+                    dt, n_pas_estime = pas_temps_implicite(
+                        duree, n_images)
 
                     def prog(it, err):
                         self._queue.put(("progress", (min(100, 100 * it / n_pas_estime), gen)))
@@ -285,8 +336,7 @@ class DomainController(QObject):
             from fieldlab.fem3d.transient import resoudre_transitoire_3d
             duree = float(p.get("duree_3d", 3.0))
             n_images = int(p.get("n_images_3d", 30))
-            dt = duree / max(1, n_images * 5)
-            n_pas = max(1, int(round(duree / dt)))
+            dt, n_pas = pas_temps_implicite(duree, n_images)
 
             def progression(it, _err):
                 self._queue.put((
@@ -325,6 +375,7 @@ class DomainController(QObject):
                     if gen != self._generation:
                         continue
                     self.panel.progress.setValue(int(valeur))
+                    self._set_status(f"Calcul… {int(valeur)} %")
                 elif kind == "done":
                     res, vizkind, scalaire_3d, gen = payload
                     if gen != self._generation:
@@ -332,17 +383,18 @@ class DomainController(QObject):
                     self.result = res
                     self.panel.progress.setValue(100)
                     if hasattr(res, "champs"):
-                        msg = (f"Régime temporel : {len(res.champs)} images, "
-                               f"{res.instants[-1]:.3g} s simulées "
-                               f"(calcul en {res.temps:.2f} s)")
+                        msg = (f"Terminé — {res.temps:.2f} s de calcul · "
+                               f"{len(res.champs)} images · "
+                               f"{format_duree(res.instants[-1])} simulées "
+                               )
                         if not res.converge:
                             msg += " — ATTENTION : au moins un instant n'a pas convergé"
                     else:
-                        msg = (f"Convergé en {res.iterations} itér. "
-                               f"({res.temps:.2f} s, err={res.erreur:.1e})"
+                        msg = (f"Terminé — {res.temps:.2f} s de calcul · "
+                               f"{res.iterations} itér. · err={res.erreur:.1e}"
                                if res.converge else
                                f"NON convergé ({res.iterations} itér.)")
-                    self.panel.status.setText(msg)
+                    self._set_status(msg)
                     self.panel.set_running(False)
                     if scalaire_3d is not None:
                         self.plot.set_scalaire_3d(scalaire_3d)
@@ -351,14 +403,15 @@ class DomainController(QObject):
                     message, gen = payload
                     if gen != self._generation:
                         continue
-                    QMessageBox.critical(self.panel, "Erreur de simulation", message)
-                    self.panel.status.setText("Erreur.")
+                    QMessageBox.critical(
+                        self.panel, tr("Erreur de simulation"), tr(message))
+                    self._set_status("Erreur.")
                     self.panel.set_running(False)
                 elif kind == "cancelled":
                     gen = payload
                     if gen != self._generation:
                         continue
-                    self.panel.status.setText("Calcul annulé.")
+                    self._set_status("Calcul annulé.")
                     self.panel.set_running(False)
         except queue.Empty:
             pass
@@ -373,11 +426,11 @@ class DomainController(QObject):
         self.panel._vider_obstacles()
         self.result = None
         self.panel.progress.setValue(0)
-        self.panel.status.setText("Prêt.")
+        self._set_status("Prêt.")
         self.panel.set_running(False)
         self.plot.reset()
         self.panel._scene_2d_modifiee()
-        self.panel.status.setText("Prêt — définissez la scène puis lancez la simulation.")
+        self._set_status("Prêt — définissez la scène puis lancez la simulation.")
 
     def reinitialiser_resultat_seul(self):
         self._annulation.set()
@@ -385,54 +438,60 @@ class DomainController(QObject):
         self.result = None
         self._derniers_parametres = None
         self.panel.progress.setValue(0)
-        self.panel.status.setText("Configuration chargée — prêt à calculer.")
+        self._set_status("Configuration chargée — prêt à calculer.")
         self.panel.set_running(False)
         self.plot.reset()
         self.panel._scene_2d_modifiee()
-        self.panel.status.setText("Configuration chargée — prête à calculer.")
+        self._set_status("Configuration chargée — prête à calculer.")
 
     def annuler(self):
         if self._annulation.is_set():
             return
         self._annulation.set()
         self.panel.set_cancelling()
-        self.panel.status.setText("Annulation demandée…")
+        self._set_status("Annulation demandée…")
 
     def export_png(self, parent=None):
         if self.result is None:
-            QMessageBox.information(parent, "Rien a exporter",
-                                     "Lancez d'abord une simulation.")
+            QMessageBox.information(
+                parent, tr("Rien a exporter"),
+                tr("Lancez d'abord une simulation."))
             return
-        path, _ = QFileDialog.getSaveFileName(parent, "Exporter la figure", "",
-                                               "PNG (*.png)")
+        from fieldlab.app.dialogues_export import DialogueExportImage
+        dialogue = DialogueExportImage(parent)
+        if not dialogue.exec():
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            parent, tr("Exporter la figure"), "", "PNG (*.png)")
         if path:
-            self.plot.save_png(path)
-            self.panel.status.setText(f"Figure exportée : {path}")
+            self.plot.save_png(path, **dialogue.options())
+            self._set_status(f"Figure exportée : {path}")
 
     def export_csv(self, parent=None):
         champ = self.plot.champ_affiche()
         if champ is None:
-            QMessageBox.information(parent, "Rien a exporter",
-                                     "Lancez d'abord une simulation.")
+            QMessageBox.information(
+                parent, tr("Rien a exporter"),
+                tr("Lancez d'abord une simulation."))
             return
-        path, _ = QFileDialog.getSaveFileName(parent, "Exporter le champ", "",
-                                               "CSV (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(
+            parent, tr("Exporter le champ"), "", "CSV (*.csv)")
         if not path:
             return
         from fieldlab.export import exporter_csv
         exporter_csv(
             path, champ, self.domaine, self._metadonnees())
-        self.panel.status.setText(f"Champ exporté : {path}")
+        self._set_status(f"Champ exporté : {path}")
 
     def export_rapport(self, parent=None):
         if self.result is None:
             QMessageBox.information(
-                parent, "Rien à exporter",
-                "Lancez d'abord une simulation.")
+                parent, tr("Rien à exporter"),
+                tr("Lancez d'abord une simulation."))
             return
         path, _ = QFileDialog.getSaveFileName(
-            parent, "Exporter le rapport pédagogique", "",
-            "Rapport HTML (*.html)")
+            parent, tr("Exporter le rapport pédagogique"), "",
+            tr("Rapport HTML (*.html)"))
         if not path:
             return
         from fieldlab.export import exporter_rapport_html
@@ -441,10 +500,11 @@ class DomainController(QObject):
                 path,
                 self._metadonnees(),
                 self.plot.image_png())
-            self.panel.status.setText(f"Rapport exporté : {path}")
+            self._set_status(f"Rapport exporté : {path}")
         except (OSError, RuntimeError, TypeError, ValueError) as erreur:
-            QMessageBox.critical(parent, "Erreur d'export", str(erreur))
-            self.panel.status.setText("Erreur d'export.")
+            QMessageBox.critical(
+                parent, tr("Erreur d'export"), tr(str(erreur)))
+            self._set_status("Erreur d'export.")
 
     def _metadonnees(self):
         from fieldlab.export import metadonnees_calcul
@@ -467,13 +527,13 @@ class DomainController(QObject):
         champ = self.plot.champ_affiche()
         if champ is None:
             QMessageBox.information(
-                parent, "Analyse indisponible",
-                "Lancez d'abord une simulation.")
+                parent, tr("Analyse indisponible"),
+                tr("Lancez d'abord une simulation."))
             return
         from fieldlab.analyse import resumer_champ
         valeurs = resumer_champ(champ, self.domaine)
         QMessageBox.information(
-            parent, "Indicateurs physiques",
+            parent, tr("Indicateurs physiques"),
             self._texte_indicateurs(
                 f"{self.domaine.titre} — {self.domaine.scalaire}", valeurs))
 
@@ -481,47 +541,51 @@ class DomainController(QObject):
         champ = self.plot.champ_affiche()
         if champ is None:
             QMessageBox.information(
-                parent, "Référence indisponible",
-                "Lancez d'abord une simulation.")
+                parent, tr("Référence indisponible"),
+                tr("Lancez d'abord une simulation."))
             return
         self._reference = champ.copy()
-        self.panel.status.setText(
-            "Résultat mémorisé comme référence A.")
+        self._set_status("Résultat mémorisé comme référence A.")
 
     def comparer_reference(self, parent=None):
         champ = self.plot.champ_affiche()
         if champ is None or self._reference is None:
             QMessageBox.information(
-                parent, "Comparaison indisponible",
-                "Mémorisez d'abord un résultat A, puis lancez le résultat B.")
+                parent, tr("Comparaison indisponible"),
+                tr("Mémorisez d'abord un résultat A, puis lancez le résultat B."))
             return
         from fieldlab.analyse import comparer_champs
         try:
             valeurs = comparer_champs(self._reference, champ)
         except ValueError as erreur:
-            QMessageBox.warning(parent, "Comparaison impossible", str(erreur))
+            QMessageBox.warning(
+                parent, tr("Comparaison impossible"), tr(str(erreur)))
             return
         QMessageBox.information(
-            parent, "Comparaison A/B",
+            parent, tr("Comparaison A/B"),
             self._texte_indicateurs(
                 "Écart entre la référence A et le résultat courant B", valeurs))
 
     def export_video(self, parent=None):
         if self.plot._transitoire is None:
             QMessageBox.information(
-                parent, "Rien a exporter",
-                "Aucune animation active : lancez d'abord une simulation en "
-                "regime transitoire (thermique) ou variable (electro/magneto).")
+                parent, tr("Rien a exporter"),
+                tr("Aucune animation active : lancez d'abord une simulation en "
+                   "regime transitoire (thermique) ou variable (electro/magneto)."))
+            return
+        from fieldlab.app.dialogues_export import DialogueExportAnimation
+        dialogue = DialogueExportAnimation(parent)
+        if not dialogue.exec():
             return
         path, _ = QFileDialog.getSaveFileName(
-            parent, "Exporter l'animation", "",
-            "Video MP4 (*.mp4);;Animation GIF (*.gif)")
+            parent, tr("Exporter l'animation"), "",
+            tr("Video MP4 (*.mp4);;Animation GIF (*.gif)"))
         if not path:
             return
-        self.panel.status.setText("Export de l'animation en cours...")
+        self._set_status("Export de l'animation en cours...")
         try:
-            self.plot.export_video(path)
-            self.panel.status.setText(f"Animation exportée : {path}")
+            self.plot.export_video(path, **dialogue.options())
+            self._set_status(f"Animation exportée : {path}")
         except Exception as e:
-            QMessageBox.critical(parent, "Erreur d'export", str(e))
-            self.panel.status.setText("Erreur d'export.")
+            QMessageBox.critical(parent, tr("Erreur d'export"), tr(str(e)))
+            self._set_status("Erreur d'export.")

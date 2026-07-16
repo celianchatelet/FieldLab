@@ -120,6 +120,19 @@ def electrodes_circulaires(N, v):
     return V, f, s
 
 
+def condensateur_dielectrique_partiel(N, v):
+    """Condensateur dont la moitié basse contient du verre (εr ≈ 7)."""
+
+    V, f, s = condensateur_plan(N, v)
+    source = np.zeros_like(V)
+    kappa = np.full_like(V, np.nan)
+    # La lame occupe une partie de l'entrefer afin de montrer la réfraction
+    # des lignes à l'interface air/verre.
+    kappa[int(0.20 * N):int(0.52 * N),
+          int(0.25 * N):int(0.76 * N)] = 7.0
+    return V, f, s, source, kappa
+
+
 GEOMETRIES = {
     NOM_SCENE_LIBRE_2D: scene_libre,
     "Condensateur plan": condensateur_plan,
@@ -136,13 +149,15 @@ GEOMETRIES = {
     "Peigne interdigite": peigne,
     "Micro-ruban (microstrip)": microruban,
     "Electrodes circulaires": electrodes_circulaires,
+    "Condensateur avec diélectrique partiel": condensateur_dielectrique_partiel,
 }
 
 NOMS = list(GEOMETRIES)
 
 
 def build(scenarios, nom, N=120, val=10.0, walls=None, obstacles=None, q=None,
-          kappa_fond=1.0, taille_domaine=1.0, rho_cp_fond=1.0):
+          kappa_fond=1.0, taille_domaine=1.0, rho_cp_fond=1.0,
+          facteur_source=1.0):
     if nom not in scenarios:
         raise KeyError(f"Scenario inconnu : {nom!r}")
     if N < 2:
@@ -157,14 +172,27 @@ def build(scenarios, nom, N=120, val=10.0, walls=None, obstacles=None, q=None,
     else:
         out = fn(N, val)
 
-    if len(out) == 4:
-        V, fixed, solid, source = out
+    kappa_scenario = rho_cp_scenario = initial_mask = None
+    if len(out) >= 4:
+        V, fixed, solid, source = out[:4]
+        if len(out) >= 5:
+            kappa_scenario = out[4]
+        if len(out) >= 6:
+            rho_cp_scenario = out[5]
+        if len(out) >= 7:
+            initial_mask = out[6]
     else:
         V, fixed, solid = out
         source = np.zeros_like(V)
 
     kappa = np.full_like(V, float(kappa_fond))
     rho_cp = np.full_like(V, float(rho_cp_fond))
+    if kappa_scenario is not None:
+        masque = np.isfinite(kappa_scenario)
+        kappa[masque] = np.asarray(kappa_scenario)[masque]
+    if rho_cp_scenario is not None:
+        masque = np.isfinite(rho_cp_scenario)
+        rho_cp[masque] = np.asarray(rho_cp_scenario)[masque]
     ob.appliquer_obstacles(V, fixed, solid, source, obstacles, kappa=kappa,
                            rho_cp=rho_cp)
 
@@ -191,7 +219,9 @@ def build(scenarios, nom, N=120, val=10.0, walls=None, obstacles=None, q=None,
 
     h = float(taille_domaine) / (N - 1)
     return Field(V, fixed, solid, h=h, walls=walls, source=source, kappa=kappa,
-                 taille_domaine=float(taille_domaine), rho_cp=rho_cp)
+                 taille_domaine=float(taille_domaine), rho_cp=rho_cp,
+                 facteur_source=facteur_source,
+                 initial_mask=initial_mask)
 
 
 def walls_defaut(nom, val):

@@ -2,6 +2,7 @@ import numpy as np
 
 from fieldlab import obstacles as ob
 from fieldlab.geometries import NOM_SCENE_LIBRE_2D
+from fieldlab.materials import MATERIAUX
 
 COTES = ("haut", "bas", "gauche", "droite")
 
@@ -74,6 +75,57 @@ def processeur_chaud(N, T):
     return V, f, s, src
 
 
+def mur_composite(N, T):
+    V, f, s, src = _vides(N)
+    verre, plastique = MATERIAUX["Verre"], MATERIAUX["Plastique"]
+    kappa = np.empty_like(V)
+    rho_cp = np.empty_like(V)
+    separation = N // 2
+    kappa[:, :separation] = verre.kappa_thermique
+    kappa[:, separation:] = plastique.kappa_thermique
+    rho_cp[:, :separation] = verre.rho_cp
+    rho_cp[:, separation:] = plastique.rho_cp
+    return V, f, s, src, kappa, rho_cp
+
+
+def ailette_refroidissement(N, T):
+    V, f, s, src = _vides(N)
+    aluminium = MATERIAUX["Aluminium"]
+    kappa = np.full_like(V, np.nan)
+    rho_cp = np.full_like(V, np.nan)
+    y0, y1, x0, x1 = (int(v * N) for v in (0.43, 0.57, 0.05, 0.90))
+    kappa[y0:y1, x0:x1] = aluminium.kappa_thermique
+    rho_cp[y0:y1, x0:x1] = aluminium.rho_cp
+    ob.rectangle(V, f, s, 0.05, 0.43, 0.09, 0.57,
+                 ("dirichlet", T))
+    return V, f, s, src, kappa, rho_cp
+
+
+def trempe(N, T):
+    """Objet de cuivre chaud libre de refroidir dans le milieu de fond."""
+
+    V, f, s, src = _vides(N)
+    cuivre = MATERIAUX["Cuivre"]
+    kappa = np.full_like(V, np.nan)
+    rho_cp = np.full_like(V, np.nan)
+    Y, X = np.ogrid[:N, :N]
+    masque = ((X - 0.5 * (N - 1)) ** 2 + (Y - 0.5 * (N - 1)) ** 2
+              <= (0.12 * N) ** 2)
+    V[masque] = float(T)
+    kappa[masque] = cuivre.kappa_thermique
+    rho_cp[masque] = cuivre.rho_cp
+    return V, f, s, src, kappa, rho_cp, masque
+
+
+def plancher_chauffant(N, T):
+    V, f, s, src = _vides(N)
+    # Béton courant : k ≈ 1,4 W/m/K et ρcp ≈ 2,0 MJ/m³/K.
+    kappa = np.full_like(V, 1.4)
+    rho_cp = np.full_like(V, 2.0e6)
+    src[int(0.08 * N):int(0.12 * N), int(0.08 * N):int(0.92 * N)] = 500.0
+    return V, f, s, src, kappa, rho_cp
+
+
 SCENARIOS = {
     NOM_SCENE_LIBRE_2D:                  scene_libre,
     "Mur (gradient 1D)":            mur,
@@ -86,6 +138,10 @@ SCENARIOS = {
     "Composant chaud":               composant_chaud,
     "Deux blocs chauds":             deux_blocs_chauds,
     "Processeur (4 blocs chauds)":   processeur_chaud,
+    "Mur composite (verre + plastique)": mur_composite,
+    "Ailette de refroidissement": ailette_refroidissement,
+    "Trempe (objet chaud dans l'eau)": trempe,
+    "Plancher chauffant": plancher_chauffant,
 }
 
 NOMS = list(SCENARIOS)
@@ -118,5 +174,14 @@ def walls_defaut(nom, val):
             {c: D(froid) for c in COTES},
         "Processeur (4 blocs chauds)":
             {c: D(froid) for c in COTES},
+        "Mur composite (verre + plastique)":
+            {"gauche": D(chaud), "droite": D(20.0), "haut": N, "bas": N},
+        "Ailette de refroidissement":
+            {c: ("robin", 8.0, 20.0) for c in COTES},
+        "Trempe (objet chaud dans l'eau)":
+            {c: N for c in COTES},
+        "Plancher chauffant":
+            {"gauche": N, "droite": N, "bas": N,
+             "haut": ("robin", 8.0, 20.0)},
     }
     return table.get(nom, {c: N for c in COTES})

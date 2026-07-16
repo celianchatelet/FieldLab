@@ -48,7 +48,9 @@ def resoudre_transitoire_3d(field0: Field3D, T_initiale: float, dt: float,
         rho_cp_nodal = np.ones(basis.N)
     M = _masse_ponderee.assemble(
         basis, rho_cp=basis.interpolate(rho_cp_nodal))
-    b = _load.assemble(basis, f=basis.interpolate(field0.source))
+    source_equation = field0.source * float(
+        getattr(field0, "facteur_source", 1.0))
+    b = _load.assemble(basis, f=basis.interpolate(source_equation))
     K, b = _appliquer_robin(K, b, mesh, basis, field0.walls)
 
     D = np.nonzero(field0.fixed_mask)[0]
@@ -74,7 +76,8 @@ def resoudre_transitoire_3d(field0: Field3D, T_initiale: float, dt: float,
                              field0.solid_mask.copy(), dict(field0.walls),
                              field0.source.copy(), field0.kappa.copy(),
                              scene=field0.scene,
-                             rho_cp=field0.rho_cp.copy())
+                             rho_cp=field0.rho_cp.copy(),
+                             facteur_source=field0.facteur_source)
             champs.append(champ)
             instants.append(it * dt)
             if progress is not None:

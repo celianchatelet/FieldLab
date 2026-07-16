@@ -1,0 +1,61 @@
+name: Release multiplateforme
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  construire:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            archive: FieldLab-Windows.zip
+          - os: macos-latest
+            archive: FieldLab-macOS.zip
+          - os: ubuntu-latest
+            archive: FieldLab-Linux.tar.gz
+    runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYVISTA_OFF_SCREEN: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bibliothèques système Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libglu1-mesa libxkbcommon-x11-0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --extra dev
+      - run: uv run pytest -q
+      - name: Construire le bundle one-dir
+        run: uv run pyinstaller --clean --noconfirm fieldlab.spec
+      - name: Compresser sous Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/FieldLab -DestinationPath FieldLab-Windows.zip
+      - name: Compresser sous macOS
+        if: runner.os == 'macOS'
+        run: ditto -c -k --sequesterRsrc --keepParent dist/FieldLab.app FieldLab-macOS.zip
+      - name: Compresser sous Linux
+        if: runner.os == 'Linux'
+        run: tar -C dist -czf FieldLab-Linux.tar.gz FieldLab
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: ${{ matrix.archive }}
+          if-no-files-found: error
+      - name: Publier sur la GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.archive }}
+          generate_release_notes: true

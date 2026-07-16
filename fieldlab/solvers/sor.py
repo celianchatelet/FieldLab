@@ -12,7 +12,8 @@ def make_step(omega):
         w = omega
         V = field.V
         V_old = V.copy()
-        terme = field.h ** 2 / 4.0 * field.source
+        terme = (field.h ** 2 / 4.0 * field.source
+                 * getattr(field, "facteur_source", 1.0))
         moy = moyenne_voisins(V, field.fluid) + terme
         V[field.rouge] = (1 - w) * V[field.rouge] + w * moy[field.rouge]
         moy = moyenne_voisins(V, field.fluid) + terme

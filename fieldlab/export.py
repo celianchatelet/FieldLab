@@ -9,6 +9,8 @@ from pathlib import Path
 
 import numpy as np
 
+from fieldlab.unites import format_duree
+
 
 def _jsonable(objet):
     if isinstance(objet, np.ndarray):
@@ -27,6 +29,11 @@ def _jsonable(objet):
 
 
 def metadonnees_calcul(domaine, parametres, resultat) -> dict:
+    parametres_export = _jsonable(parametres or {})
+    for cle in ("duree", "duree_3d"):
+        if cle in parametres_export:
+            parametres_export[f"{cle}_formatee"] = format_duree(
+                parametres_export[cle])
     meta = {
         "format": "fieldlab-resultat",
         "version": 1,
@@ -35,7 +42,7 @@ def metadonnees_calcul(domaine, parametres, resultat) -> dict:
         "titre": domaine.titre,
         "scalaire": domaine.scalaire,
         "champ_vectoriel": domaine.champ,
-        "parametres": _jsonable(parametres or {}),
+        "parametres": parametres_export,
     }
     if resultat is not None:
         meta["calcul"] = {
@@ -45,11 +52,22 @@ def metadonnees_calcul(domaine, parametres, resultat) -> dict:
             "converge": getattr(resultat, "converge", None),
             "nombre_images": len(getattr(resultat, "champs", []) or []),
         }
+        instants = getattr(resultat, "instants", None)
+        if instants:
+            meta["calcul"]["duree_simulee_s"] = float(instants[-1])
+            meta["calcul"]["duree_simulee_formatee"] = format_duree(
+                instants[-1])
     return _jsonable(meta)
 
 
 def exporter_csv(chemin, champ, domaine, metadonnees=None) -> None:
     from fieldlab.fem3d.field3d import Field3D
+
+    nom_source = {
+        "Electrostatique": "densite_charge_C_m3",
+        "Magnetostatique": "densite_courant_A_m2",
+        "Thermique": "source_thermique_W_m3",
+    }.get(domaine.nom, "source")
 
     chemin = Path(chemin)
     if isinstance(champ, Field3D):
@@ -70,7 +88,7 @@ def exporter_csv(chemin, champ, domaine, metadonnees=None) -> None:
             ("valeur_imposee", champ.fixed_mask.astype(int)),
             ("isolant", champ.solid_mask.astype(int)),
             ("kappa", champ.kappa),
-            ("source", champ.source),
+            (nom_source, champ.source),
             ("rho_cp_J_m3_K", champ.rho_cp),
         ]
     else:
@@ -90,7 +108,7 @@ def exporter_csv(chemin, champ, domaine, metadonnees=None) -> None:
             ("valeur_imposee", champ.fixed_mask.astype(int).ravel()),
             ("isolant", champ.solid_mask.astype(int).ravel()),
             ("kappa", champ.kappa.ravel()),
-            ("source", champ.source.ravel()),
+            (nom_source, champ.source.ravel()),
             ("rho_cp_J_m3_K", champ.rho_cp.ravel()),
         ]
 

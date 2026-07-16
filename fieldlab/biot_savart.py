@@ -1,8 +1,7 @@
 import numpy as np
 
 from fieldlab.annulation import verifier
-
-MU_0 = 4.0e-7 * np.pi
+from fieldlab.constantes import MU_0
 
 
 def champ_segments(points_fil: np.ndarray, courant: float,

@@ -36,6 +36,9 @@ class Field3D:
 
     rho_cp: np.ndarray = None
 
+    # Conversion de la densité physique vers le second membre de Poisson.
+    facteur_source: float = 1.0
+
     def __post_init__(self):
         n = self.basis.N
         if self.solid_mask is None:
@@ -48,6 +51,7 @@ class Field3D:
             self.rho_cp = np.ones(n)
         if self.walls is None:
             self.walls = {f: ("neumann",) for f in FACES}
+        self.facteur_source = float(self.facteur_source)
         for nom, tableau in (("V", self.V), ("fixed_mask", self.fixed_mask),
                               ("solid_mask", self.solid_mask),
                               ("source", self.source), ("kappa", self.kappa)):
@@ -77,4 +81,5 @@ class Field3D:
             libelle_scalaire=self.libelle_scalaire,
             scene=self.scene,
             rho_cp=self.rho_cp.copy(),
+            facteur_source=self.facteur_source,
         )

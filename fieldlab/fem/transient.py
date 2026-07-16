@@ -72,7 +72,10 @@ def resoudre_transitoire(field0: Field, T_initiale: float, dt: float,
     K = _laplace_kappa.assemble(basis, kappa=basis.interpolate(kappa_nodal))
     M = (L ** 2) * _masse_ponderee.assemble(
         basis, rho_cp=basis.interpolate(rho_cp_nodal))
-    b = (L ** 2) * _load.assemble(basis, f=basis.interpolate(source_nodal))
+    source_equation = source_nodal * float(
+        getattr(field0, "facteur_source", 1.0))
+    b = (L ** 2) * _load.assemble(
+        basis, f=basis.interpolate(source_equation))
 
 
 
@@ -87,6 +90,8 @@ def resoudre_transitoire(field0: Field, T_initiale: float, dt: float,
     resoudre_pas = spla.factorized(A.tocsc())
 
     T = np.full(basis.N, float(T_initiale))
+    masque_initial_nodal = field0.initial_mask[_i, _j]
+    T[masque_initial_nodal] = v_nodal[masque_initial_nodal]
     T[D] = v_nodal[D]
 
     n_pas = max(1, int(round(duree / dt)))
@@ -101,7 +106,8 @@ def resoudre_transitoire(field0: Field, T_initiale: float, dt: float,
                           field0.h, dict(field0.walls), field0.omega, field0.source.copy(),
                           field0.kappa.copy(),
                           getattr(field0, "taille_domaine", 1.0),
-                          field0.rho_cp.copy())
+                          field0.rho_cp.copy(), field0.facteur_source,
+                          field0.initial_mask.copy())
             champs.append(champ)
             instants.append(it * dt)
             if progress is not None:

@@ -158,7 +158,10 @@ def preparer_systeme(field: Field, refine: int = 0) -> SystemeFEM:
 
     L = float(getattr(field, "taille_domaine", 1.0) or 1.0)
     K = _laplace_kappa.assemble(basis, kappa=basis.interpolate(kappa_nodal))
-    b = (L ** 2) * _load.assemble(basis, f=basis.interpolate(source_nodal))
+    source_equation = source_nodal * float(
+        getattr(field, "facteur_source", 1.0))
+    b = (L ** 2) * _load.assemble(
+        basis, f=basis.interpolate(source_equation))
     K, b = _appliquer_robin(K, b, mesh, basis, field.walls, echelle_bord=L)
     return SystemeFEM(mesh, basis, K, b, n_base)
 
@@ -255,7 +258,8 @@ def resoudre_systeme(systeme: SystemeFEM, field: Field, methode: str = "direct",
                   field.h, dict(field.walls), field.omega, field.source.copy(),
                   field.kappa.copy(),
                   getattr(field, "taille_domaine", 1.0),
-                  field.rho_cp.copy())
+                  field.rho_cp.copy(), field.facteur_source,
+                  field.initial_mask.copy())
 
     return FemSolverResult(champ, iterations, erreur, temps, converge, [])
 

@@ -3,11 +3,13 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
+    QButtonGroup, QCheckBox, QDoubleSpinBox, QFileDialog,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QMessageBox, QPushButton, QSpinBox, QVBoxLayout,
 )
 
+from fieldlab.app.widgets_i18n import ComboBoxTraduit as QComboBox
+from fieldlab.i18n import tr
 from fieldlab.fem3d.scene import ItemGeometrie, OPERATIONS_CAO, Scene3D
 from fieldlab.fem3d.scene_editor import (
     TYPES_CIRCUITS, angles_euler_depuis_matrice, centre_item,
@@ -15,6 +17,9 @@ from fieldlab.fem3d.scene_editor import (
     matrice_rotation_euler, params_primitive, transformer_element_affine,
 )
 from fieldlab.materials import NOMS_MATERIAUX
+from fieldlab.app.vocabulaire_domaine import (
+    libelle_q, libelle_valeur, natures_autorisees, roles_autorises,
+)
 
 
 def _spin(valeur=0.0, minimum=-1.0e6, maximum=1.0e6, pas=0.05):
@@ -35,6 +40,8 @@ class SceneEditorPanel(QGroupBox):
             1.0, ((0.0, 0.0, 0.0), (1.0, 1.0, 1.0)))
         self._chargement_formulaire = False
         self._restauration_historique = False
+        self._conditions_limites_produisent_champ = False
+        self._conditions_limites_ancrent_solution = False
         self._historique = []
         self._index_historique = -1
         self._build()
@@ -125,9 +132,7 @@ class SceneEditorPanel(QGroupBox):
 
         choix = QHBoxLayout()
         self.cb_nature = QComboBox()
-        self.cb_nature.addItems(
-            ["Primitive", "Circuit"]
-            if self.domaine_nom == "Magnetostatique" else ["Primitive"])
+        self.cb_nature.addItems(natures_autorisees(self.domaine_nom))
         self.cb_nature.currentTextChanged.connect(self._maj_nature)
         self.edit_label = QLineEdit("Objet")
         choix.addWidget(QLabel("Élément"))
@@ -141,20 +146,27 @@ class SceneEditorPanel(QGroupBox):
         self.cb_forme = QComboBox()
         self.cb_forme.addItems(["boite", "sphere", "cylindre", "maillage_importe"])
         self.cb_role = QComboBox()
-        roles = (["decoratif", "conducteur"] if self.domaine_nom == "Magnetostatique"
-                 else ["electrode", "isolant", "materiau", "source",
-                       "conducteur", "decoratif"])
-        self.cb_role.addItems(roles)
+        self.cb_role.addItems(roles_autorises(self.domaine_nom))
+        self.cb_role.currentIndexChanged.connect(
+            lambda: self._maj_role(self.cb_role.currentText()))
         self.cb_materiau = QComboBox(); self.cb_materiau.addItems(NOMS_MATERIAUX)
         self.spin_valeur = _spin(0.0)
         self.spin_q = _spin(0.0)
-        for i, (texte, widget) in enumerate((
-                ("Forme", self.cb_forme), ("Rôle", self.cb_role),
-                ("Matériau", self.cb_materiau), ("Valeur", self.spin_valeur),
-                ("q", self.spin_q))):
-            ligne, paire = divmod(i, 2)
-            gp.addWidget(QLabel(texte), ligne, 2 * paire)
-            gp.addWidget(widget, ligne, 2 * paire + 1)
+        self.lbl_forme = QLabel("Forme")
+        self.lbl_role = QLabel("Rôle")
+        self.lbl_materiau = QLabel("Matériau")
+        self.lbl_valeur = QLabel()
+        self.lbl_q = QLabel()
+        gp.addWidget(self.lbl_forme, 0, 0)
+        gp.addWidget(self.cb_forme, 0, 1)
+        gp.addWidget(self.lbl_role, 0, 2)
+        gp.addWidget(self.cb_role, 0, 3)
+        gp.addWidget(self.lbl_materiau, 1, 0)
+        gp.addWidget(self.cb_materiau, 1, 1)
+        gp.addWidget(self.lbl_valeur, 1, 2)
+        gp.addWidget(self.spin_valeur, 1, 3)
+        gp.addWidget(self.lbl_q, 2, 0)
+        gp.addWidget(self.spin_q, 2, 1)
         layout.addWidget(self.groupe_primitive)
 
         geometrie = QGridLayout()
@@ -209,7 +221,7 @@ class SceneEditorPanel(QGroupBox):
         self.liste.setMaximumHeight(125)
         self.liste.currentRowChanged.connect(self._charger_selection)
         layout.addWidget(self.liste)
-        self._maj_nature()
+        self._maj_visibilite_champs()
 
     @property
     def index_selectionne(self):
@@ -284,9 +296,34 @@ class SceneEditorPanel(QGroupBox):
         self._notifier(modifie=True)
 
     def _maj_nature(self, *_args):
-        circuit = self.cb_nature.currentText() == "Circuit"
-        self.groupe_primitive.setVisible(not circuit)
+        self._maj_visibilite_champs()
+
+    def _maj_role(self, role):
+        if (role == "conducteur" and not self._chargement_formulaire
+                and self.cb_materiau.findText("Cuivre") >= 0):
+            self.cb_materiau.setCurrentText("Cuivre")
+        self._maj_visibilite_champs()
+
+    def _maj_visibilite_champs(self):
+        nature = self.cb_nature.currentText()
+        role = self.cb_role.currentText()
+        primitive = nature == "Primitive"
+        circuit = (self.domaine_nom == "Magnetostatique"
+                   and nature == "Circuit")
+        texte_valeur = libelle_valeur(self.domaine_nom, role)
+        texte_q = libelle_q(self.domaine_nom, role)
+        materiau = primitive and role in {"materiau", "conducteur"}
+
+        self.groupe_primitive.setVisible(primitive)
         self.groupe_circuit.setVisible(circuit)
+        self.lbl_materiau.setVisible(materiau)
+        self.cb_materiau.setVisible(materiau)
+        self.lbl_valeur.setText(texte_valeur or "")
+        self.lbl_valeur.setVisible(primitive and texte_valeur is not None)
+        self.spin_valeur.setVisible(primitive and texte_valeur is not None)
+        self.lbl_q.setText(texte_q or "")
+        self.lbl_q.setVisible(primitive and texte_q is not None)
+        self.spin_q.setVisible(primitive and texte_q is not None)
 
     def _rotation(self):
         return (self.spin_rx.value(), self.spin_ry.value(), self.spin_rz.value())
@@ -316,9 +353,10 @@ class SceneEditorPanel(QGroupBox):
                         if type_circuit == "polyligne" else None),
                 label=label)
         role = self.cb_role.currentText()
-        materiau = ("Cuivre" if role == "conducteur"
-                    else self.cb_materiau.currentText()
-                    if role == "materiau" else None)
+        if role not in roles_autorises(self.domaine_nom):
+            raise ValueError("Sélectionnez un rôle autorisé pour ce domaine.")
+        materiau = (self.cb_materiau.currentText()
+                    if role in {"materiau", "conducteur"} else None)
         forme = self.cb_forme.currentText()
         if forme == "maillage_importe":
             raise ValueError("Utilisez le bouton « Importer STL / STEP ».")
@@ -340,17 +378,17 @@ class SceneEditorPanel(QGroupBox):
 
     def importer_cao(self):
         chemin, _ = QFileDialog.getOpenFileName(
-            self, "Importer un solide 3D", "",
-            "Solides 3D (*.stl *.step *.stp);;STL (*.stl);;STEP (*.step *.stp)")
+            self, tr("Importer un solide 3D"), "",
+            tr("Solides 3D (*.stl *.step *.stp);;STL (*.stl);;STEP (*.step *.stp)"))
         if not chemin:
             return
         suffixe = Path(chemin).suffix.lower()
         operation = "domaine" if not self.scene.items_cao else "union"
         if suffixe == ".stl" and self.scene.items_cao:
             QMessageBox.warning(
-                self, "STL discret",
-                "Un STL peut former seul le domaine tétraédrique. Pour des "
-                "booléens OpenCASCADE, importez un STEP.")
+                self, tr("STL discret"),
+                tr("Un STL peut former seul le domaine tétraédrique. Pour des "
+                   "booléens OpenCASCADE, importez un STEP."))
             operation = "aucune"
         item = ItemGeometrie(
             "maillage_importe",
@@ -377,7 +415,8 @@ class SceneEditorPanel(QGroupBox):
             self._rafraichir_liste(selection)
             self._notifier(modifie=True)
         except (KeyError, TypeError, ValueError) as erreur:
-            QMessageBox.warning(self, "Objet 3D invalide", str(erreur))
+            QMessageBox.warning(
+                self, tr("Objet 3D invalide"), tr(str(erreur)))
 
     def mettre_a_jour(self):
         index = self.index_selectionne
@@ -407,7 +446,8 @@ class SceneEditorPanel(QGroupBox):
             self._rafraichir_liste(index)
             self._notifier(modifie=True)
         except (KeyError, TypeError, ValueError) as erreur:
-            QMessageBox.warning(self, "Modification impossible", str(erreur))
+            QMessageBox.warning(
+                self, tr("Modification impossible"), tr(str(erreur)))
 
     def dupliquer(self):
         if self.index_selectionne < 0:
@@ -429,16 +469,19 @@ class SceneEditorPanel(QGroupBox):
 
     def sauvegarder(self):
         chemin, _ = QFileDialog.getSaveFileName(
-            self, "Sauvegarder la scène", "", "Scène FieldLab (*.json)")
+            self, tr("Sauvegarder la scène"), "",
+            tr("Scène FieldLab (*.json)"))
         if chemin:
             try:
                 self.scene.sauvegarder_json(chemin)
             except (OSError, TypeError, ValueError) as erreur:
-                QMessageBox.critical(self, "Sauvegarde impossible", str(erreur))
+                QMessageBox.critical(
+                    self, tr("Sauvegarde impossible"), tr(str(erreur)))
 
     def charger(self):
         chemin, _ = QFileDialog.getOpenFileName(
-            self, "Charger une scène", "", "Scène FieldLab (*.json)")
+            self, tr("Charger une scène"), "",
+            tr("Scène FieldLab (*.json)"))
         if not chemin:
             return
         try:
@@ -447,7 +490,8 @@ class SceneEditorPanel(QGroupBox):
             self._rafraichir_liste(0 if self.scene.items or self.scene.circuits else -1)
             self._notifier(modifie=True)
         except (OSError, KeyError, TypeError, ValueError) as erreur:
-            QMessageBox.critical(self, "Chargement impossible", str(erreur))
+            QMessageBox.critical(
+                self, tr("Chargement impossible"), tr(str(erreur)))
 
     def _charger_domaine(self):
         self._chargement_formulaire = True
@@ -529,7 +573,7 @@ class SceneEditorPanel(QGroupBox):
             self._notifier(modifie=True)
         except (TypeError, ValueError, np.linalg.LinAlgError) as erreur:
             QMessageBox.warning(
-                self, "Transformation impossible", str(erreur))
+                self, tr("Transformation impossible"), tr(str(erreur)))
 
     def _redimensionner_element(self, element, nouvelles_bornes,
                                 anciennes_bornes):
@@ -635,6 +679,11 @@ class SceneEditorPanel(QGroupBox):
         dmax = np.asarray(self.scene.boite_domaine[1], dtype=float)
         bornes = []
         elements = self.scene.items + self.scene.circuits
+        roles_valides = set(roles_autorises(self.domaine_nom))
+        for i, item in enumerate(self.scene.items):
+            if item.role not in roles_valides:
+                avertissements.append(
+                    f"{i + 1}: rôle hérité « {item.role} » sans effet dans ce domaine")
         for i, element in enumerate(elements):
             b = self._bornes_element(element)
             bornes.append(b)
@@ -652,9 +701,17 @@ class SceneEditorPanel(QGroupBox):
                 if np.all(recouvrement > 1e-9):
                     avertissements.append(
                         f"{i + 1}↔{j + 1}: chevauchement à vérifier")
+        produit_un_champ, message_champ = self.scene_produit_un_champ()
         if avertissements:
             self.label_diagnostic.setText(
                 "Attention — " + " ; ".join(avertissements[:4]))
+            self.label_diagnostic.setStyleSheet("color: #f59e0b;")
+        elif not produit_un_champ:
+            self.label_diagnostic.setText(message_champ)
+            self.label_diagnostic.setStyleSheet("color: #f59e0b;")
+        elif (self.domaine_nom != "Magnetostatique"
+              and not self.scene_a_une_reference()):
+            self.label_diagnostic.setText(self.message_reference_manquante())
             self.label_diagnostic.setStyleSheet("color: #f59e0b;")
         else:
             self.label_diagnostic.setText(
@@ -671,7 +728,12 @@ class SceneEditorPanel(QGroupBox):
                 self.cb_nature.setCurrentText("Primitive")
                 self.edit_label.setText(item.label)
                 self.cb_forme.setCurrentText(item.forme)
-                self.cb_role.setCurrentText(item.role)
+                index_role = self.cb_role.findText(item.role)
+                self.cb_role.setCurrentIndex(index_role)
+                self.cb_role.setToolTip(
+                    "" if index_role >= 0 else
+                    f"Le rôle hérité « {item.role} » n'est pas proposé dans "
+                    f"le domaine {self.domaine_nom}.")
                 self.cb_operation_cao.setCurrentText(item.operation_cao)
                 if item.materiau:
                     self.cb_materiau.setCurrentText(item.materiau)
@@ -710,7 +772,58 @@ class SceneEditorPanel(QGroupBox):
             self.spin_rz.setValue(float(rotation[2]))
         finally:
             self._chargement_formulaire = False
+        self._maj_visibilite_champs()
         self._notifier(modifie=False)
+
+    def scene_produit_un_champ(self) -> tuple[bool, str]:
+        """Indique si la scène libre contient au moins une excitation utile."""
+
+        if self.domaine_nom == "Magnetostatique":
+            if self.scene.circuits:
+                return True, ""
+            return False, (
+                "Aucun circuit dans la scène : le champ B sera nul. Ajoutez "
+                "un fil, une spire ou une bobine (élément “Circuit”).")
+        if (self._conditions_limites_produisent_champ
+                or any(item.role in {"electrode", "source"}
+                       for item in self.scene.items)):
+            return True, ""
+        return False, (
+            "La scène ne contient ni valeur imposée ni source : le champ "
+            "sera constant/nul.")
+
+    def scene_a_une_reference(self) -> bool:
+        """Indique si le problème de Poisson possède une référence physique."""
+
+        return (self.domaine_nom == "Magnetostatique"
+                or self._conditions_limites_ancrent_solution
+                or any(item.role == "electrode" for item in self.scene.items))
+
+    def message_reference_manquante(self) -> str:
+        """Explique comment ancrer le potentiel ou la température en 3D."""
+
+        if self.domaine_nom == "Electrostatique":
+            return (
+                "Aucun potentiel de référence n'est imposé. Ajoutez une "
+                "électrode ou choisissez « Potentiel imposé » sur au moins "
+                "une face du domaine.")
+        return (
+            "Aucune température de référence n'est imposée. Ajoutez une "
+            "température imposée, une paroi de convection ou une paroi de "
+            "rayonnement.")
+
+    def definir_conditions_limites(
+            self, productrices: bool, ancrent_solution: bool):
+        """Synchronise le diagnostic avec les conditions des faces externes."""
+
+        productrices = bool(productrices)
+        ancrent_solution = bool(ancrent_solution)
+        if (productrices == self._conditions_limites_produisent_champ
+                and ancrent_solution == self._conditions_limites_ancrent_solution):
+            return
+        self._conditions_limites_produisent_champ = productrices
+        self._conditions_limites_ancrent_solution = ancrent_solution
+        self._maj_diagnostic()
 
     def _notifier(self, modifie=False):
         if modifie:

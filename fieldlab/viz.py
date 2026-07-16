@@ -1,6 +1,8 @@
 import numpy as np
+from matplotlib.ticker import EngFormatter
 
 from fieldlab.field import champ_electrique
+from fieldlab.unites import unite_depuis_libelle
 
 KINDS = [
     "Carte scalaire",
@@ -9,6 +11,13 @@ KINDS = [
     "Lignes de champ",
     "Intensité du champ",
 ]
+
+
+def _prefixes_si_barre(barre, libelle):
+    unite = unite_depuis_libelle(libelle)
+    if unite:
+        barre.ax.yaxis.set_major_formatter(
+            EngFormatter(unit=unite, places=2, sep=" "))
 
 
 def _etendue(field):
@@ -130,7 +139,9 @@ def plot_carte(ax, field, scalaire, levels=20):
     _overlay_electrodes(ax, field)
     _overlay_sources(ax, field)
     _overlay_materiaux(ax, field)
-    ax.figure.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label=scalaire)
+    barre = ax.figure.colorbar(
+        im, ax=ax, fraction=0.046, pad=0.04, label=scalaire)
+    _prefixes_si_barre(barre, scalaire)
     ax.set_title(scalaire)
     _axes_metres(ax)
 
@@ -179,7 +190,10 @@ def plot_intensite(ax, field, champ_fn, champ):
                    extent=_etendue(field))
     _overlay_solides(ax, field)
     _overlay_sources(ax, field)
-    ax.figure.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label=f"|{champ}|")
+    libelle = f"|{champ}|"
+    barre = ax.figure.colorbar(
+        im, ax=ax, fraction=0.046, pad=0.04, label=libelle)
+    _prefixes_si_barre(barre, champ)
     ax.set_title(f"Intensité : |{champ}|")
     _axes_metres(ax)
 
@@ -210,8 +224,10 @@ def dessiner_calques(ax, field, calques, champ_fn=champ_electrique,
             valeurs, origin="lower",
             cmap="inferno" if fond_intensite else "plasma",
             aspect="equal", extent=ext, alpha=0.88)
-        ax.figure.colorbar(
+        barre = ax.figure.colorbar(
             im, ax=ax, fraction=0.046, pad=0.04, label=titre_barre)
+        _prefixes_si_barre(
+            barre, champ if fond_intensite else scalaire)
     if calques.get("iso", False):
         valeurs_iso = _valeurs_sans_objets(field)
         if np.ptp(valeurs_iso.compressed()) > 1e-14:

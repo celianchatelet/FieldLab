@@ -1,12 +1,16 @@
 import copy
 
 from PySide6.QtWidgets import (
-    QComboBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget,
+    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget,
     QPushButton, QVBoxLayout,
 )
 
+from fieldlab.app.widgets_i18n import ComboBoxTraduit as QComboBox
 from fieldlab.materials import MATERIAUX, NOMS_MATERIAUX, kappa_pour_domaine
 from fieldlab.app.panels.base import BasePanel, COTES, make_double_spin
+from fieldlab.app.vocabulaire_domaine import (
+    libelle_parametre_2d, libelle_role,
+)
 from fieldlab.fem3d.scenarios_magnetisme import SCENARIOS_3D_MAGNETISME
 
 _FORMES_MAGNETO = ["fil (disque)", "barre (rectangle)"]
@@ -24,14 +28,24 @@ class MagnetoPanel(BasePanel):
         self.wall_kind = {}
         self.wall_p1 = {}
         super().__init__(controller, parent)
+        self.label_limite_biot_savart = QLabel(
+            "Champ des circuits dans le vide — les matériaux magnétiques ne "
+            "sont pas pris en compte en 3D (Biot–Savart). Les primitives 3D "
+            "sont uniquement décoratives.")
+        self.label_limite_biot_savart.setWordWrap(True)
+        self.label_limite_biot_savart.setStyleSheet("color: #d97706;")
+        self.conteneur_3d.layout().insertWidget(
+            0, self.label_limite_biot_savart)
 
 
     def _build_domain_params(self, layout, dom):
         p = QGroupBox("Paramètres")
         pl = QVBoxLayout(p)
         self.spin_J = make_double_spin(dom.defaut)
-        self._row(pl, "Courant J (A/m²)", self.spin_J)
-        self._row(pl, "Résolution N", self.spin_N)
+        self.spin_J.setToolTip(
+            "Densité de courant hors du plan, en ampères par mètre carré.")
+        self._row(pl, libelle_parametre_2d("Magnetostatique"), self.spin_J)
+        self._row(pl, "Résolution N", self.spin_N, niveau="expert")
         layout.addWidget(p)
         self._build_environnement(layout)
         self._build_regime_variable(layout)
@@ -40,7 +54,8 @@ class MagnetoPanel(BasePanel):
         o = QGroupBox("Sources de courant")
         self.groupes_edition_2d = [o]
         ol = QVBoxLayout(o)
-        info = QLabel("Fil (disque-source) ou barre (rectangle-source) avec J signe.\n"
+        info = QLabel("Fil (disque-source) ou barre (rectangle-source) avec "
+                       "J en A/m².\n"
                        "+ = courant sortant (rouge) ;  - = courant entrant (bleu)")
         info.setWordWrap(True)
         info.setStyleSheet("color: gray;")
@@ -57,9 +72,11 @@ class MagnetoPanel(BasePanel):
         self.spin_src_x = make_double_spin(0.5, 0.0, 1.0, decimals=3, step=0.05)
         self.spin_src_y = make_double_spin(0.5, 0.0, 1.0, decimals=3, step=0.05)
         self.spin_src_r = make_double_spin(0.05, 0.0, 1.0, decimals=3, step=0.01)
-        self.spin_src_J = make_double_spin(20.0)
+        self.spin_src_J = make_double_spin(100000.0, -1.0e9, 1.0e9,
+                                           decimals=2, step=1000.0)
         for lab, w in (("x", self.spin_src_x), ("y", self.spin_src_y),
-                       ("taille", self.spin_src_r), ("J", self.spin_src_J)):
+                       ("taille", self.spin_src_r),
+                       ("J (A/m²)", self.spin_src_J)):
             r2.addWidget(QLabel(lab))
             r2.addWidget(w)
         ol.addLayout(r2)
@@ -85,7 +102,9 @@ class MagnetoPanel(BasePanel):
         ol.addWidget(self.liste)
         layout.addWidget(o)
 
-        n = QGroupBox("Noyaux (matériaux)")
+        n = QGroupBox(
+            "Noyaux (" + libelle_role("Magnetostatique", "materiau").lower()
+            + ")")
         self.groupes_edition_2d.append(n)
         nl = QVBoxLayout(n)
         info_n = QLabel("Objet rempli d'un materiau reel (fer/acier : concentrent le\n"
@@ -201,7 +220,8 @@ class MagnetoPanel(BasePanel):
             courant = float(source["bc"][1])
             forme = "fil" if source["forme"] == "disque" else "barre"
             self.liste.addItem(
-                f"{forme} J={courant:+.3g} ({x:.2f},{y:.2f}) t={taille:.2f}")
+                f"{forme} J={courant:+.3g} A/m² "
+                f"({x:.2f},{y:.2f}) t={taille:.2f}")
         self.liste.blockSignals(False)
         if selection is not None and self.sources:
             self.liste.setCurrentRow(min(selection, len(self.sources) - 1))

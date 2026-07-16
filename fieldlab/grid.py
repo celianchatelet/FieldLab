@@ -33,6 +33,13 @@ class Field:
 
     rho_cp: np.ndarray = None
 
+    # La source reste stockée dans son unité physique (C/m³, A/m² ou W/m³).
+    # Ce facteur ne s'applique qu'au second membre de l'équation de Poisson.
+    facteur_source: float = 1.0
+
+    # Température initiale locale pour les scénarios transitoires (ex. trempe).
+    initial_mask: np.ndarray = None
+
     free: np.ndarray = field(init=False, repr=False)
     rouge: np.ndarray = field(init=False, repr=False)
     noir: np.ndarray = field(init=False, repr=False)
@@ -47,10 +54,15 @@ class Field:
             self.kappa = np.ones(self.V.shape)
         if self.rho_cp is None:
             self.rho_cp = np.ones(self.V.shape)
+        if self.initial_mask is None:
+            self.initial_mask = np.zeros(self.V.shape, dtype=bool)
         if self.walls is None:
             self.walls = {c: ("neumann",) for c in ("haut", "bas", "gauche", "droite")}
         if self.V.shape != self.fixed_mask.shape:
             raise ValueError("V et fixed_mask doivent avoir la meme forme.")
+        if self.initial_mask.shape != self.V.shape:
+            raise ValueError("initial_mask doit avoir la même forme que V.")
+        self.facteur_source = float(self.facteur_source)
 
         self.fluid = ~self.solid_mask
 
@@ -74,4 +86,5 @@ class Field:
         return Field(self.V.copy(), self.fixed_mask.copy(),
                      self.solid_mask.copy(), self.h, dict(self.walls),
                      self.omega, self.source.copy(), self.kappa.copy(),
-                     self.taille_domaine, self.rho_cp.copy())
+                     self.taille_domaine, self.rho_cp.copy(),
+                     self.facteur_source, self.initial_mask.copy())
