@@ -11,6 +11,10 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+release/
+FieldLab-*.zip
+FieldLab-*.tar.gz
+FieldLab-*.sha256
 downloads/
 eggs/
 .eggs/

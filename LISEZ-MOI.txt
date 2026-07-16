@@ -1,0 +1,58 @@
+FIELDLAB 2 — DÉMARRAGE RAPIDE
+==============================
+
+FieldLab est un laboratoire pédagogique de simulation 2D/3D consacré à
+l'électrostatique, à la magnétostatique et aux transferts thermiques.
+
+WINDOWS
+-------
+1. Décompressez entièrement l'archive téléchargée.
+2. Ouvrez le dossier FieldLab.
+3. Double-cliquez sur FieldLab.exe.
+
+Ne déplacez pas FieldLab.exe hors de son dossier et ne supprimez pas le dossier
+_internal : ces éléments sont nécessaires au lancement.
+
+Si Windows SmartScreen affiche « Windows a protégé votre ordinateur », vérifiez
+que l'archive vient de la page officielle du projet, puis choisissez
+« Informations complémentaires » et « Exécuter quand même ».
+
+MACOS
+-----
+Décompressez l'archive, puis ouvrez FieldLab.app. Si macOS bloque le premier
+lancement, faites un clic droit sur l'application, choisissez « Ouvrir », puis
+confirmez.
+
+LINUX
+-----
+Décompressez l'archive et lancez FieldLab/FieldLab. Si nécessaire, rendez le
+fichier exécutable avec : chmod +x FieldLab/FieldLab
+
+PREMIER ESSAI
+-------------
+1. Ouvrez le mode Cours.
+2. Choisissez un domaine et un scénario.
+3. Conservez les paramètres proposés et cliquez sur Simuler.
+4. Ajoutez une sonde ou un profil pour effectuer une mesure.
+
+IMPORTANT
+---------
+FieldLab est un outil pédagogique et exploratoire. Il ne remplace pas un
+logiciel de calcul certifié pour le dimensionnement d'un système d'ingénierie.
+
+Projet et documentation : https://github.com/celianchatelet/FieldLab
+
+
+FIELDLAB 2 — QUICK START
+========================
+
+FieldLab is a 2D/3D teaching simulator for electrostatics, magnetostatics and
+heat transfer. Extract the complete archive before launching the application.
+Do not move the executable away from the files distributed with it.
+
+Windows: open the FieldLab folder and run FieldLab.exe.
+macOS: open FieldLab.app; on first launch, right-click and select Open if needed.
+Linux: run FieldLab/FieldLab and use chmod +x FieldLab/FieldLab if necessary.
+
+FieldLab is intended for teaching and exploration, not for certified
+engineering calculations.

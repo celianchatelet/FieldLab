@@ -1,62 +1,165 @@
 # FieldLab 2
 
-FieldLab est un laboratoire multiphysique 2D/3D destiné aux cours de physique : électrostatique, magnétostatique et thermique. Le mode **Cours** fournit des scénarios prêts à simuler et des exports directement utilisables dans des diapositives ; le mode **Expert** expose le maillage, les solveurs et les conditions aux limites.
+[![CI](https://github.com/celianchatelet/FieldLab/actions/workflows/ci.yml/badge.svg)](https://github.com/celianchatelet/FieldLab/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg)](https://www.python.org/)
 
-FieldLab is a 2D/3D multiphysics laboratory for physics teaching: electrostatics, magnetostatics and heat transfer. **Classroom mode** provides ready-to-run scenarios and slide-ready exports; **Expert mode** exposes meshes, solvers and boundary conditions. The interface can switch between French and English from **Langue / Language**.
+![FieldLab en mode Cours](https://raw.githubusercontent.com/celianchatelet/FieldLab/main/docs/images/fieldlab-cours.png)
 
-## Télécharger / Download
+FieldLab est un laboratoire pédagogique multiphysique 2D/3D consacré à
+l'électrostatique, à la magnétostatique et aux transferts thermiques. Il vise
+l'enseignement et l'exploration de modèles physiques, avec une interface en
+français ou en anglais.
 
-- [Windows — FieldLab-Windows.zip](../../releases/latest/download/FieldLab-Windows.zip)
-- [macOS — FieldLab-macOS.zip](../../releases/latest/download/FieldLab-macOS.zip)
-- [Linux — FieldLab-Linux.tar.gz](../../releases/latest/download/FieldLab-Linux.tar.gz)
+Le mode **Cours** propose des scénarios prêts à simuler et des exports adaptés
+aux supports pédagogiques. Le mode **Expert** donne accès au maillage, aux
+solveurs et aux conditions aux limites.
 
-Décompressez l’archive, puis lancez `FieldLab` (`FieldLab.exe` sous Windows ou `FieldLab.app` sous macOS). Python n’est pas requis.
+> FieldLab est un outil pédagogique. Ce n'est pas un logiciel de calcul certifié
+> pour le dimensionnement ou la validation d'un système d'ingénierie.
 
-Extract the archive and launch `FieldLab` (`FieldLab.exe` on Windows or `FieldLab.app` on macOS). Python is not required.
+## Fonctionnalités principales
 
-### Avertissements des systèmes / OS warnings
+- simulations 2D et 3D en électrostatique, magnétostatique et thermique ;
+- scénarios pédagogiques : condensateur plan, cage de Faraday, fils parallèles,
+  bobines de Helmholtz, mur composite, trempe thermique, etc. ;
+- cartes scalaires, vecteurs, lignes de champ, coupes et sondes ;
+- profils quantitatifs et comparaison entre une référence A et un résultat B ;
+- régimes stationnaires et transitoires selon le domaine ;
+- exports PNG jusqu'en 4K, CSV, GIF et MP4 horodatés ;
+- interface bilingue français/anglais.
 
-Les binaires communautaires ne sont pas signés. Sous Windows, SmartScreen peut afficher « Windows a protégé votre ordinateur » : vérifiez que l’archive vient bien de cette page Releases, puis choisissez **Informations complémentaires → Exécuter quand même**. Sous macOS, faites un clic droit sur `FieldLab.app`, choisissez **Ouvrir**, puis confirmez ; ou autorisez l’application dans **Réglages Système → Confidentialité et sécurité**. Sous Linux, rendez le lanceur exécutable si nécessaire avec `chmod +x FieldLab/FieldLab`.
+## Télécharger et lancer l'application
 
-Community binaries are unsigned. On Windows, verify that the archive came from this Releases page, then use **More info → Run anyway** in SmartScreen. On macOS, right-click `FieldLab.app`, select **Open**, and confirm; alternatively allow it under **System Settings → Privacy & Security**. On Linux, run `chmod +x FieldLab/FieldLab` if needed.
+Les versions autonomes sont publiées dans la page
+[Releases](https://github.com/celianchatelet/FieldLab/releases). Choisissez
+l'archive correspondant à votre système :
 
-## En cours / In the classroom
+- `FieldLab-Windows.zip` ;
+- `FieldLab-macOS.zip` ;
+- `FieldLab-Linux.tar.gz`.
 
-1. Choisissez un domaine et un scénario.
-2. Ajustez les deux ou trois paramètres visibles, puis cliquez **Simuler**.
-3. Posez jusqu’à cinq sondes, tracez un profil 1D ou lisez l’animation au facteur ×1 à ×1000.
-4. Exportez une image 1080p, 1440p ou 4K, un profil CSV/PNG, ou une animation GIF/MP4 horodatée.
+Python n'est pas nécessaire pour utiliser ces versions.
 
-See the [Guide du professeur](docs/GUIDE_PROFESSEUR.md) for suggested activities and learning goals.
+### Windows
 
-## Périmètre physique / Physical scope
+1. Téléchargez puis décompressez **entièrement** l'archive.
+2. Ouvrez le dossier `FieldLab`.
+3. Double-cliquez sur `FieldLab.exe`.
 
-- Les unités et les propriétés des matériaux sont en SI. Les durées thermiques sont de vraies secondes et dépendent de `κ/(ρcp)`.
-- Le thermique fluide simule la **conduction pure**. La convection naturelle et l’écoulement ne sont pas résolus ; l’échauffement réel de l’eau peut donc être plus rapide.
-- Le magnétisme 3D utilise Biot–Savart dans le vide. Les matériaux ferromagnétiques n’y modifient pas le champ et sont désactivés dans l’éditeur 3D magnétique.
-- Un modèle 2D représente une géométrie invariante dans la direction hors plan : charges et courants y sont volumiques dans cette coupe extrudée, et non des objets ponctuels 3D.
-- Les résultats restent des modèles numériques pédagogiques : vérifiez le maillage et les hypothèses avant tout usage d’ingénierie.
+Ne déplacez pas `FieldLab.exe` hors de son dossier : le répertoire `_internal`
+placé à côté contient les bibliothèques nécessaires.
 
-The SI material data and thermal time scales are physical. Fluid heat transfer is conduction-only; 3D magnetism is vacuum Biot–Savart; and 2D models assume out-of-plane invariance. FieldLab is a teaching simulator, not a certified engineering package.
+### macOS
 
-## Pour les développeurs / For developers
+Décompressez l'archive puis ouvrez `FieldLab.app`. Si Gatekeeper bloque le
+premier lancement, faites un clic droit sur l'application, choisissez **Ouvrir**
+et confirmez.
+
+### Linux
+
+Décompressez l'archive puis lancez `FieldLab/FieldLab`. Si nécessaire :
+
+```bash
+chmod +x FieldLab/FieldLab
+```
+
+### Avertissement de sécurité du système
+
+Les exécutables communautaires ne sont pas encore signés numériquement. Sous
+Windows, SmartScreen peut afficher « Windows a protégé votre ordinateur ».
+Après avoir vérifié que l'archive provient bien de la page Releases officielle,
+choisissez **Informations complémentaires → Exécuter quand même**.
+
+Chaque archive publiée est accompagnée d'un fichier `.sha256` permettant d'en
+vérifier l'intégrité.
+
+## Première utilisation en cours
+
+1. Sélectionnez un domaine et un scénario.
+2. Gardez d'abord les paramètres proposés et cliquez sur **Simuler**.
+3. Ajoutez des sondes ou tracez un profil 1D pour obtenir des valeurs
+   quantitatives.
+4. Modifiez un seul paramètre, puis comparez le résultat à la référence.
+5. Exportez une image, un profil ou une animation pour votre support de cours.
+
+Le [Guide du professeur](docs/GUIDE_PROFESSEUR.md) propose des activités et des
+objectifs d'apprentissage. Le fichier [LISEZ-MOI](LISEZ-MOI.txt) reprend les
+instructions de lancement fournies avec chaque archive.
+
+## Périmètre et hypothèses physiques
+
+- Les unités et les propriétés des matériaux sont exprimées en SI.
+- En thermique des fluides, FieldLab simule la **conduction pure** : la
+  convection naturelle et l'écoulement ne sont pas résolus.
+- Le magnétisme 3D repose sur Biot–Savart dans le vide. Les matériaux
+  ferromagnétiques n'y modifient pas le champ.
+- Un modèle 2D représente une géométrie invariante dans la direction hors plan.
+  Les charges et courants sont donc volumiques dans cette coupe extrudée.
+- Une visualisation convaincante ne suffit pas à démontrer la convergence :
+  vérifiez le maillage, les conditions aux limites et la sensibilité des sondes.
+
+Les contrôles analytiques et numériques actuellement automatisés sont décrits
+dans [Validation scientifique](docs/VALIDATION.md).
+
+## Documentation
+
+- [Guide du professeur](docs/GUIDE_PROFESSEUR.md)
+- [Validation scientifique et limites](docs/VALIDATION.md)
+- [Construction des exécutables](docs/PACKAGING.md)
+- [Internationalisation](docs/I18N.md)
+- [Historique des changements](CHANGELOG.md)
+- [Contribuer](CONTRIBUTING.md)
+- [Citer FieldLab](CITATION.cff)
+
+## Développement
 
 Prérequis : [uv](https://docs.astral.sh/uv/) et Python 3.10 ou plus récent.
 
 ```bash
+git clone https://github.com/celianchatelet/FieldLab.git
+cd FieldLab
 uv sync --extra dev
 uv run fieldlab
-uv run pytest
 ```
 
-Créer le bundle local :
+Avant toute proposition de modification :
+
+```bash
+uv run ruff check --select E9,F63,F7,F82 fieldlab tests main.py
+uv run pytest -q
+```
+
+Pour construire le bundle local :
 
 ```bash
 uv run pyinstaller --clean --noconfirm fieldlab.spec
 ```
 
-Le résultat one-dir se trouve dans `dist/FieldLab`. Consultez [PACKAGING.md](docs/PACKAGING.md) pour les bibliothèques natives et [I18N.md](docs/I18N.md) pour le mécanisme FR/EN. Un tag `v2.0.0` déclenche automatiquement les trois builds et les joint à la GitHub Release.
+Le résultat se trouve dans `dist/FieldLab`. Un tag correspondant exactement à
+la version du `pyproject.toml`, par exemple `v2.0.0`, déclenche les builds natifs
+Windows, macOS et Linux et les publie dans une GitHub Release.
 
-## Licence / License
+## Licence
 
-Ajoutez ici la licence choisie par le projet avant une diffusion publique. / Add the project’s chosen license here before public distribution.
+La licence propre à FieldLab est indiquée dans le fichier `LICENSE`. Les
+composants tiers intégrés ou utilisés par l'application restent soumis à leurs
+licences respectives, recensées dans `THIRD_PARTY_NOTICES.md`.
+
+Si FieldLab est utilisé dans un cours, une publication ou un autre travail
+académique, les métadonnées de citation sont disponibles dans `CITATION.cff`.
+
+## Auteur
+
+**Célian Chatelet**<br>
+Institut Polytechnique des Sciences Avancées<br>
+63 boulevard de Brandebourg, Ivry-sur-Seine, France
+
+## English summary
+
+FieldLab is a bilingual 2D/3D teaching laboratory for electrostatics,
+magnetostatics and heat transfer. Classroom mode provides ready-to-run
+activities and presentation-ready exports, while Expert mode exposes meshes,
+solvers and boundary conditions. Standalone builds are available from the
+[Releases page](https://github.com/celianchatelet/FieldLab/releases); Python is
+not required. FieldLab is intended for teaching and numerical exploration, not
+for certified engineering work.

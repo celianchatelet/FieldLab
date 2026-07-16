@@ -1,17 +1,45 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "fieldlab"
 version = "2.0.0"
 description = "Laboratoire pédagogique multiphysique 2D/3D interactif"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Célian Chatelet" },
+]
 requires-python = ">=3.10"
+keywords = [
+    "education",
+    "electrostatics",
+    "finite-elements",
+    "heat-transfer",
+    "magnetostatics",
+    "physics",
+    "simulation",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Education",
+    "Topic :: Scientific/Engineering :: Physics",
+]
 dependencies = [
     "numpy>=1.24,<2.5",
     "scipy>=1.10",
     "matplotlib>=3.7",
-    "PySide6>=6.6",
+    "PySide6-Essentials>=6.6",
     "scikit-fem>=10.0",
     "pyvista>=0.44",
     "pyvistaqt>=0.11",
@@ -31,6 +59,13 @@ dev = [
 
 [project.scripts]
 fieldlab = "fieldlab.app.main_window:run"
+
+[project.urls]
+Homepage = "https://github.com/celianchatelet/FieldLab"
+Documentation = "https://github.com/celianchatelet/FieldLab#readme"
+Repository = "https://github.com/celianchatelet/FieldLab.git"
+Issues = "https://github.com/celianchatelet/FieldLab/issues"
+Changelog = "https://github.com/celianchatelet/FieldLab/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["fieldlab*"]

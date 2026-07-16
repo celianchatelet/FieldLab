@@ -24,38 +24,88 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
       PYVISTA_OFF_SCREEN: "true"
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Bibliothèques système Linux
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libegl1 libgl1 libglu1-mesa libxkbcommon-x11-0
+
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+
       - run: uv python install 3.12
-      - run: uv sync --extra dev
+
+      - name: Vérifier la version du tag
+        run: >-
+          uv run --no-project python -c "import os, tomllib;
+          version=tomllib.load(open('pyproject.toml','rb'))['project']['version'];
+          tag=os.environ['GITHUB_REF_NAME'];
+          assert tag == f'v{version}', f'Le tag {tag} ne correspond pas à la version v{version}'"
+
+      - name: Vérifier le verrou des dépendances
+        run: uv lock --check
+
+      - run: uv sync --extra dev --frozen
       - run: uv run pytest -q
+
       - name: Construire le bundle one-dir
         run: uv run pyinstaller --clean --noconfirm fieldlab.spec
-      - name: Compresser sous Windows
+
+      - name: Préparer et compresser sous Windows
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path dist/FieldLab -DestinationPath FieldLab-Windows.zip
-      - name: Compresser sous macOS
+        run: |
+          New-Item -ItemType Directory -Path release/FieldLab -Force | Out-Null
+          Copy-Item -Path dist/FieldLab/* -Destination release/FieldLab -Recurse -Force
+          Copy-Item -Path LISEZ-MOI.txt, LICENSE, THIRD_PARTY_NOTICES.md, CITATION.cff -Destination release/FieldLab
+          Copy-Item -Path docs/GUIDE_PROFESSEUR.md -Destination release/FieldLab/GUIDE_PROFESSEUR.md
+          Compress-Archive -Path release/FieldLab -DestinationPath ${{ matrix.archive }}
+
+      - name: Préparer et compresser sous macOS
         if: runner.os == 'macOS'
-        run: ditto -c -k --sequesterRsrc --keepParent dist/FieldLab.app FieldLab-macOS.zip
-      - name: Compresser sous Linux
+        run: |
+          mkdir -p release/FieldLab
+          cp -R dist/FieldLab.app release/FieldLab/
+          cp LISEZ-MOI.txt LICENSE THIRD_PARTY_NOTICES.md CITATION.cff release/FieldLab/
+          cp docs/GUIDE_PROFESSEUR.md release/FieldLab/GUIDE_PROFESSEUR.md
+          ditto -c -k --sequesterRsrc --keepParent release/FieldLab ${{ matrix.archive }}
+
+      - name: Préparer et compresser sous Linux
         if: runner.os == 'Linux'
-        run: tar -C dist -czf FieldLab-Linux.tar.gz FieldLab
+        run: |
+          mkdir -p release
+          cp -R dist/FieldLab release/FieldLab
+          cp LISEZ-MOI.txt LICENSE THIRD_PARTY_NOTICES.md CITATION.cff release/FieldLab/
+          cp docs/GUIDE_PROFESSEUR.md release/FieldLab/GUIDE_PROFESSEUR.md
+          tar -C release -czf ${{ matrix.archive }} FieldLab
+
+      - name: Calculer l'empreinte SHA-256
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+        run: >-
+          uv run python -c "import hashlib, os; from pathlib import Path;
+          p=Path(os.environ['ARCHIVE']);
+          h=hashlib.sha256(p.read_bytes()).hexdigest();
+          Path(str(p)+'.sha256').write_text(f'{h}  {p.name}\n', encoding='ascii')"
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.archive }}
-          path: ${{ matrix.archive }}
+          path: |
+            ${{ matrix.archive }}
+            ${{ matrix.archive }}.sha256
           if-no-files-found: error
+
       - name: Publier sur la GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.archive }}
+          files: |
+            ${{ matrix.archive }}
+            ${{ matrix.archive }}.sha256
+          fail_on_unmatched_files: true
           generate_release_notes: true

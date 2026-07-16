@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: >-
+  Si vous utilisez FieldLab dans un cours, une publication ou un autre travail
+  académique, merci de citer ce logiciel.
+title: FieldLab
+type: software
+version: 2.0.0
+authors:
+  - given-names: Célian
+    family-names: Chatelet
+    affiliation: Institut Polytechnique des Sciences Avancées
+    address: 63 boulevard de Brandebourg
+    city: Ivry-sur-Seine
+    country: FR
+repository-code: https://github.com/celianchatelet/FieldLab
+url: https://github.com/celianchatelet/FieldLab
+license: MIT
+keywords:
+  - electrostatics
+  - magnetostatics
+  - heat transfer
+  - physics education
+  - simulation

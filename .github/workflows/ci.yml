@@ -20,7 +20,9 @@ jobs:
         with:
           enable-cache: true
       - run: uv python install 3.12
-      - run: uv sync --extra dev
+      - name: Vérifier le verrou des dépendances
+        run: uv lock --check
+      - run: uv sync --extra dev --frozen
       - name: Lint bloquant
         run: uv run ruff check --select E9,F63,F7,F82 fieldlab tests main.py
       - name: Tests
