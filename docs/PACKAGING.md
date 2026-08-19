@@ -62,9 +62,44 @@ Le workflow `.github/workflows/release.yml` est déclenché par un tag `v*`. Il 
 1. vérifie que le tag correspond à la version de `pyproject.toml` ;
 2. vérifie `uv.lock` et exécute les tests ;
 3. construit un bundle natif sous Windows, macOS et Linux ;
-4. ajoute les documents de distribution ;
-5. calcule une empreinte SHA-256 ;
-6. joint les archives et les empreintes à la GitHub Release.
+4. signe sous Windows tous les fichiers `.exe`, `.dll` et `.pyd` avec Azure
+   Artifact Signing ;
+5. vérifie que toutes les signatures Authenticode sont valides ;
+6. ajoute les documents de distribution ;
+7. calcule une empreinte SHA-256 ;
+8. joint les archives et les empreintes à la GitHub Release.
+
+### Configurer la signature Windows
+
+La publication Windows échoue volontairement si la signature n'est pas
+configurée. Cela empêche de republier une archive que Smart App Control
+bloquerait au chargement d'un module Python natif.
+
+Créez un compte **Azure Artifact Signing** avec un profil de certificat
+**Public Trust**, puis attribuez le rôle `Artifact Signing Certificate Profile
+Signer` à l'application Microsoft Entra utilisée par GitHub Actions. Configurez
+une identité fédérée OIDC limitée au dépôt `celianchatelet/FieldLab`.
+
+Ajoutez ensuite les paramètres suivants dans
+`Settings → Secrets and variables → Actions` du dépôt GitHub :
+
+- secrets : `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+  `AZURE_SUBSCRIPTION_ID` ;
+- variables : `ARTIFACT_SIGNING_ENDPOINT`,
+  `ARTIFACT_SIGNING_ACCOUNT_NAME`,
+  `ARTIFACT_SIGNING_CERTIFICATE_PROFILE`.
+
+Le profil doit utiliser un certificat RSA délivré par une autorité reconnue par
+Microsoft. Un certificat autosigné ne suffit pas pour Smart App Control. Le
+workflow horodate les signatures, conserve les éventuelles signatures tierces
+et signe récursivement l'intégralité du bundle natif avant compression.
+
+Pour contrôler manuellement un bundle signé :
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\scripts\verify_windows_signatures.ps1 -BundlePath dist/FieldLab
+```
 
 Exemple pour la version 2.0.0 :
 
@@ -88,8 +123,9 @@ Ne créez le tag qu'après validation du commit sur lequel il pointe.
   modification du spec ou des exclusions.
 - **macOS** : `FieldLab.app` n'est ni signé ni notarisé. Gatekeeper demandera une
   confirmation au premier lancement.
-- **Windows** : le binaire non signé peut déclencher SmartScreen. Une signature
-  Authenticode est nécessaire pour supprimer cet avertissement de confiance.
+- **Windows** : SmartScreen et Smart App Control peuvent bloquer un binaire
+  sans réputation. Il faut signer l'exécutable, mais aussi toutes les DLL et
+  extensions Python `.pyd` chargées par l'application.
 - **Licences** : le bundle contient des bibliothèques LGPL/GPL et un binaire
   FFmpeg GPLv3. Vérifier `THIRD_PARTY_NOTICES.md` et conserver les avis associés.
 

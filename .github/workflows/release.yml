@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   construire:
@@ -55,6 +56,40 @@ jobs:
 
       - name: Construire le bundle one-dir
         run: uv run pyinstaller --clean --noconfirm fieldlab.spec
+
+      # Smart App Control contrôle chaque module natif au moment de son
+      # chargement. Signer seulement FieldLab.exe ne suffit donc pas : les DLL
+      # et les extensions Python (.pyd) du bundle doivent l'être également.
+      - name: Se connecter à Azure pour signer le bundle Windows
+        if: runner.os == 'Windows'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Signer tous les binaires Windows avec Artifact Signing
+        if: runner.os == 'Windows'
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
+          files-folder: ${{ github.workspace }}\dist\FieldLab
+          files-folder-filter: exe,dll,pyd
+          files-folder-recurse: true
+          append-signature: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: FieldLab
+          description-url: https://github.com/celianchatelet/FieldLab
+          timeout: 1800
+
+      - name: Vérifier toutes les signatures Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/verify_windows_signatures.ps1 -BundlePath dist/FieldLab
 
       - name: Préparer et compresser sous Windows
         if: runner.os == 'Windows'

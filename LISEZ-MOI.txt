@@ -13,9 +13,10 @@ WINDOWS
 Ne déplacez pas FieldLab.exe hors de son dossier et ne supprimez pas le dossier
 _internal : ces éléments sont nécessaires au lancement.
 
-Si Windows SmartScreen affiche « Windows a protégé votre ordinateur », vérifiez
-que l'archive vient de la page officielle du projet, puis choisissez
-« Informations complémentaires » et « Exécuter quand même ».
+Vérifiez dans les propriétés de FieldLab.exe que l'onglet « Signatures
+numériques » est présent. N'utilisez pas une archive sans signature valide :
+SmartScreen ou Smart App Control peut bloquer l'exécutable ou l'un de ses
+modules internes.
 
 MACOS
 -----

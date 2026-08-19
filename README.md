@@ -65,10 +65,12 @@ chmod +x FieldLab/FieldLab
 
 ### Avertissement de sécurité du système
 
-Les exécutables communautaires ne sont pas encore signés numériquement. Sous
-Windows, SmartScreen peut afficher « Windows a protégé votre ordinateur ».
-Après avoir vérifié que l'archive provient bien de la page Releases officielle,
-choisissez **Informations complémentaires → Exécuter quand même**.
+La version Windows 2.0.0 n'est pas compatible avec Smart App Control. Les
+prochaines archives Windows doivent être signées numériquement pendant leur
+publication. Vérifiez dans les propriétés de `FieldLab.exe` que l'onglet
+**Signatures numériques** est présent. N'utilisez pas une archive Windows qui
+ne possède pas de signature valide : SmartScreen ou Smart App Control peut
+alors bloquer l'exécutable ou l'un de ses modules internes.
 
 Chaque archive publiée est accompagnée d'un fichier `.sha256` permettant d'en
 vérifier l'intégrité.

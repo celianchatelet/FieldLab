@@ -14,11 +14,12 @@ et les versions suivent [Semantic Versioning](https://semver.org/lang/fr/).
 - sondes, profils 1D et comparaison d'une référence A avec un résultat B ;
 - exports PNG 1080p, 1440p et 4K, CSV, GIF et MP4 horodatés ;
 - guide du professeur et documentation de validation scientifique ;
-- bundles autonomes multiplateformes construits par GitHub Actions.
+- bundles autonomes multiplateformes construits par GitHub Actions ;
+- signature Authenticode de tous les composants natifs du bundle Windows avec
+  Azure Artifact Signing, vérifiée avant publication.
 
 ### Limites connues
 
-- les exécutables ne sont pas signés numériquement ;
 - le thermique fluide est limité à la conduction ;
 - le magnétisme 3D utilise Biot–Savart dans le vide ;
 - les modèles 2D supposent une invariance hors plan.
