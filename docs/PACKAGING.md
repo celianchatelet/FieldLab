@@ -37,11 +37,10 @@ lanceur `FieldLab.exe` est une copie, sans modification binaire, de
 `pythonw.exe` : sa signature Authenticode de la Python Software Foundation reste
 donc valide.
 
-Smart App Control refuse les extensions VTK diffusées sur PyPI sur certaines
-machines. Elles ne sont pas incluses dans l'archive Windows 2.0.1 : la 3D est
-désactivée dans cette édition, tandis que les simulations, mesures et exports 2D
-restent disponibles. Les versions macOS/Linux et l'exécution depuis les sources
-conservent la 3D.
+L'archive Windows 2.0.2 embarque VTK 9.5.x, PyVista, PyVistaQt et Gmsh. Cette
+version de VTK a été retenue après des essais sous Smart App Control avec le
+marquage Internet appliqué aux fichiers natifs. Le repli 2D reste présent si le
+chargement 3D échoue sur une machine particulière.
 
 Ne distribuez jamais `FieldLab.exe` seul. Les DLL du runtime et le dossier
 `Lib\site-packages` placés à côté sont indispensables.
@@ -84,16 +83,16 @@ Aucun compte Azure, certificat payant ou secret de signature n'est nécessaire.
 Exemple :
 
 ```bash
-git tag -a v2.0.1 -m "FieldLab 2.0.1"
-git push origin v2.0.1
+git tag -a v2.0.2 -m "FieldLab 2.0.2"
+git push origin v2.0.2
 ```
 
 Ne créez le tag qu'après validation du commit sur lequel il pointe.
 
 ## Pièges connus
 
-- **Windows/VTK** : l'édition portable Windows 2.0.1 est volontairement limitée
-  à la 2D afin d'éviter les DLL VTK refusées par Smart App Control.
+- **Windows/VTK** : conserver la contrainte `vtk>=9.5,<9.6`. VTK 9.6.2 charge
+  des modules secondaires refusés par Smart App Control sur la machine de test.
 - **Linux/OpenGL** : la machine de build a besoin de `libGL`, `libEGL` et
   `libGLU`.
 - **Plugins Qt** : les plugins natifs de la plateforme doivent rester dans le
@@ -110,8 +109,10 @@ Sur une machine sans Python :
 2. vérifier son SHA-256 puis la décompresser entièrement ;
 3. lancer `FieldLab.exe` et confirmer l'absence de blocage Windows ;
 4. ouvrir un scénario 2D dans chacun des trois domaines ;
-5. lancer une simulation puis exporter un PNG et un MP4 ;
-6. fermer puis relancer l'application.
+5. lancer une simulation 3D, puis tester carte, iso-surfaces, flèches, lignes de
+   champ et plan de coupe ;
+6. exporter un PNG et un MP4 ;
+7. fermer puis relancer l'application.
 
 Ce test manuel reste nécessaire même si la construction et les tests automatisés
 réussissent.

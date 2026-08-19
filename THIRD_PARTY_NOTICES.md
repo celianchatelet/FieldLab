@@ -66,8 +66,8 @@ version de `imageio-ffmpeg`.
 | meshio | échange de maillages | MIT |
 | PyInstaller | construction des bundles macOS/Linux | GPL-2.0-or-later avec exception pour le bootloader |
 
-PyVista, PyVistaQt et VTK ne sont pas redistribués dans l'édition Windows 2.0.1.
-Ils restent présents dans les éditions 3D macOS/Linux.
+PyVista, PyVistaQt, VTK 9.5.x et Gmsh sont de nouveau redistribués dans l'édition
+Windows à partir de la version 2.0.2 afin de fournir la 3D.
 
 Les versions exactes et leurs empreintes sont verrouillées dans `uv.lock`. Les
 dépendances transitives peuvent ajouter d'autres avis ; leurs fichiers de licence

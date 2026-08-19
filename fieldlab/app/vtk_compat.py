@@ -1,7 +1,7 @@
 """Chargement facultatif de la visualisation VTK/PyVista.
 
-Le paquet Windows portable désactive VTK lorsque Smart App Control refuse ses
-extensions natives. Les simulations et visualisations 2D restent disponibles.
+Si VTK ne peut pas être chargé, les simulations et visualisations 2D restent
+disponibles au lieu d'empêcher le démarrage de toute l'application.
 """
 
 from dataclasses import dataclass, field as dataclass_field

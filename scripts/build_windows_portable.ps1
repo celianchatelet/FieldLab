@@ -72,8 +72,6 @@ Push-Location $projectRoot
 try {
     Invoke-Checked {
         uv --quiet --cache-dir $uvCachePath export --frozen --no-dev --no-emit-project `
-            --no-emit-package gmsh --no-emit-package pyvista `
-            --no-emit-package pyvistaqt --no-emit-package vtk `
             --format requirements-txt --output-file $requirements
     } "L'export des dépendances"
 

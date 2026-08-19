@@ -6,6 +6,19 @@ et les versions suivent [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Non publié]
 
+## [2.0.2] - 2026-08-19
+
+### Corrigé
+
+- rétablissement des simulations, maillages et visualisations 3D dans
+  l'exécutable Windows ;
+- verrouillage de VTK sur la branche 9.5.x, dont les modules utilisés par
+  FieldLab passent Smart App Control, contrairement à VTK 9.6.2 sur la machine
+  de validation ;
+- validation de PyVista, PyVistaQt, Gmsh, des iso-surfaces, flèches, lignes de
+  champ, plans de coupe et scènes 3D avec les fichiers marqués comme provenant
+  d'Internet.
+
 ## [2.0.1] - 2026-08-19
 
 ### Corrigé
@@ -41,6 +54,7 @@ et les versions suivent [Semantic Versioning](https://semver.org/lang/fr/).
 - le magnétisme 3D utilise Biot–Savart dans le vide ;
 - les modèles 2D supposent une invariance hors plan.
 
-[Non publié]: https://github.com/celianchatelet/FieldLab/compare/v2.0.1...HEAD
+[Non publié]: https://github.com/celianchatelet/FieldLab/compare/v2.0.2...HEAD
+[2.0.2]: https://github.com/celianchatelet/FieldLab/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/celianchatelet/FieldLab/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/celianchatelet/FieldLab/releases/tag/v2.0.0

@@ -14,9 +14,9 @@ Ne déplacez pas FieldLab.exe hors de son dossier et ne supprimez pas les DLL ou
 le dossier Lib : ces éléments sont nécessaires au lancement.
 
 Dans les propriétés de FieldLab.exe, l'onglet « Signatures numériques » doit
-indiquer « Python Software Foundation ». Cette édition Windows fournit toutes
-les fonctions 2D. La vue 3D est désactivée afin d'éviter les DLL VTK bloquées
-par Smart App Control.
+indiquer « Python Software Foundation ». À partir de la version 2.0.2, cette
+édition Windows fournit les simulations et visualisations 2D et 3D. Si le
+chargement 3D échoue sur un PC particulier, FieldLab reste utilisable en 2D.
 
 MACOS
 -----

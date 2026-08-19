@@ -6,14 +6,8 @@ relancer l'interface dans un éventuel processus enfant.
 """
 
 from pathlib import Path
-import os
 import sys
 import traceback
-
-
-# Les extensions VTK distribuées sur PyPI ne sont pas acceptées par certaines
-# stratégies Smart App Control. FieldLab garde alors toutes ses fonctions 2D.
-os.environ.setdefault("FIELDLAB_DISABLE_VTK", "1")
 
 
 def _est_lanceur_fieldlab() -> bool:

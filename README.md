@@ -71,10 +71,10 @@ par la **Python Software Foundation** et ne nécessite aucun service Azure.
 Vérifiez ce signataire dans l'onglet **Signatures numériques** des propriétés de
 `FieldLab.exe`.
 
-Pour éviter les DLL VTK refusées par certaines stratégies Microsoft, l'édition
-Windows 2.0.1 fournit les simulations, mesures et exports **2D** et désactive la
-3D. La 3D reste disponible sous macOS/Linux et lors d'une exécution depuis les
-sources.
+La version 2.0.2 rétablit les simulations et visualisations **3D** sous Windows
+avec VTK 9.5.x, testé avec Smart App Control. Si VTK ne peut malgré tout pas être
+chargé sur une machine particulière, FieldLab démarre en 2D au lieu de quitter
+avec une erreur.
 
 Chaque archive publiée est accompagnée d'un fichier `.sha256` permettant d'en
 vérifier l'intégrité.
@@ -148,7 +148,7 @@ uv run pyinstaller --clean --noconfirm fieldlab.spec
 ```
 
 Le résultat PyInstaller se trouve dans `dist/FieldLab`. Un tag correspondant exactement à
-la version du `pyproject.toml`, par exemple `v2.0.1`, déclenche les builds natifs
+la version du `pyproject.toml`, par exemple `v2.0.2`, déclenche les builds natifs
 Windows, macOS et Linux et les publie dans une GitHub Release.
 
 ## Licence
