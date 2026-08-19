@@ -4,7 +4,8 @@ message: >-
   académique, merci de citer ce logiciel.
 title: FieldLab
 type: software
-version: 2.0.0
+version: 2.0.1
+date-released: 2026-08-19
 authors:
   - given-names: Célian
     family-names: Chatelet

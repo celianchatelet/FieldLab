@@ -5,22 +5,20 @@ from time import monotonic
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
-from pyvistaqt import QtInteractor
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QButtonGroup, QFileDialog, QGridLayout, QHBoxLayout, QLabel,
     QPushButton, QSlider, QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
 )
-from vtkmodules.vtkRenderingCore import vtkCellPicker
-
 from fieldlab import viz
 from fieldlab.app import theme as theme_app
-from fieldlab.app import viz3d
+from fieldlab.app.vtk_compat import (
+    THREE_D_AVAILABLE, QtInteractor, fem3d_render, viz3d, vtkCellPicker,
+)
 from fieldlab.app.widgets_i18n import ComboBoxTraduit as QComboBox
 from fieldlab.i18n import tr
 from fieldlab.fem3d.calques import MODES_GRAINES
 from fieldlab.fem3d.coupe import fractions_plans, origine_plan_dans_bornes
-from fieldlab.fem3d import render as fem3d_render
 from fieldlab.fem3d.field3d import Field3D
 from fieldlab.fem3d.rendu_p3 import (
     abscisses_cumulees, superpositions_coupe_par_defaut,
@@ -96,6 +94,11 @@ class PlotPanel(QWidget):
         self.btn_2d.setChecked(True)
         self.btn_3d = QPushButton("Vue 3D")
         self.btn_3d.setCheckable(True)
+        if not THREE_D_AVAILABLE:
+            self.btn_3d.setEnabled(False)
+            self.btn_3d.setToolTip(
+                "Vue 3D désactivée : Windows bloque le composant VTK. "
+                "La vue 2D reste entièrement disponible.")
         groupe = QButtonGroup(self)
         groupe.setExclusive(True)
         groupe.addButton(self.btn_2d)

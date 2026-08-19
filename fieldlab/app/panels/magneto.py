@@ -8,10 +8,14 @@ from PySide6.QtWidgets import (
 from fieldlab.app.widgets_i18n import ComboBoxTraduit as QComboBox
 from fieldlab.materials import MATERIAUX, NOMS_MATERIAUX, kappa_pour_domaine
 from fieldlab.app.panels.base import BasePanel, COTES, make_double_spin
+from fieldlab.app.vtk_compat import THREE_D_AVAILABLE
 from fieldlab.app.vocabulaire_domaine import (
     libelle_parametre_2d, libelle_role,
 )
-from fieldlab.fem3d.scenarios_magnetisme import SCENARIOS_3D_MAGNETISME
+if THREE_D_AVAILABLE:
+    from fieldlab.fem3d.scenarios_magnetisme import SCENARIOS_3D_MAGNETISME
+else:
+    SCENARIOS_3D_MAGNETISME = {}
 
 _FORMES_MAGNETO = ["fil (disque)", "barre (rectangle)"]
 _FORMES_NOYAU = ["disque", "rectangle"]

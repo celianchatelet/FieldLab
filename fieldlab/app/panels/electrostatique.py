@@ -9,10 +9,16 @@ from fieldlab.app.widgets_i18n import ComboBoxTraduit as QComboBox
 from fieldlab.obstacles import FORMES
 from fieldlab.materials import MATERIAUX, NOMS_MATERIAUX, kappa_pour_domaine
 from fieldlab.app.panels.base import BasePanel, COTES, make_double_spin
+from fieldlab.app.vtk_compat import THREE_D_AVAILABLE
 from fieldlab.app.vocabulaire_domaine import (
     libelle_parametre_2d, libelle_role,
 )
-from fieldlab.fem3d.scenarios_par_domaine import SCENARIOS_3D_ELECTROSTATIQUE
+if THREE_D_AVAILABLE:
+    from fieldlab.fem3d.scenarios_par_domaine import (
+        SCENARIOS_3D_ELECTROSTATIQUE,
+    )
+else:
+    SCENARIOS_3D_ELECTROSTATIQUE = {}
 
 _PREFIXE_MATERIAU = "materiau : "
 _LIBELLE_ELECTRODE = libelle_role("Electrostatique", "electrode")

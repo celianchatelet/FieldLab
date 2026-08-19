@@ -46,8 +46,8 @@ Python n'est pas nécessaire pour utiliser ces versions.
 2. Ouvrez le dossier `FieldLab`.
 3. Double-cliquez sur `FieldLab.exe`.
 
-Ne déplacez pas `FieldLab.exe` hors de son dossier : le répertoire `_internal`
-placé à côté contient les bibliothèques nécessaires.
+Ne déplacez pas `FieldLab.exe` hors de son dossier : les DLL et le répertoire
+`Lib` placés à côté contiennent les bibliothèques nécessaires.
 
 ### macOS
 
@@ -65,12 +65,16 @@ chmod +x FieldLab/FieldLab
 
 ### Avertissement de sécurité du système
 
-La version Windows 2.0.0 n'est pas compatible avec Smart App Control. Les
-prochaines archives Windows doivent être signées numériquement pendant leur
-publication. Vérifiez dans les propriétés de `FieldLab.exe` que l'onglet
-**Signatures numériques** est présent. N'utilisez pas une archive Windows qui
-ne possède pas de signature valide : SmartScreen ou Smart App Control peut
-alors bloquer l'exécutable ou l'un de ses modules internes.
+La version Windows 2.0.0 n'est pas compatible avec Smart App Control. À partir
+de la version 2.0.1, l'archive Windows utilise le runtime Python officiel signé
+par la **Python Software Foundation** et ne nécessite aucun service Azure.
+Vérifiez ce signataire dans l'onglet **Signatures numériques** des propriétés de
+`FieldLab.exe`.
+
+Pour éviter les DLL VTK refusées par certaines stratégies Microsoft, l'édition
+Windows 2.0.1 fournit les simulations, mesures et exports **2D** et désactive la
+3D. La 3D reste disponible sous macOS/Linux et lors d'une exécution depuis les
+sources.
 
 Chaque archive publiée est accompagnée d'un fichier `.sha256` permettant d'en
 vérifier l'intégrité.
@@ -131,14 +135,20 @@ uv run ruff check --select E9,F63,F7,F82 fieldlab tests main.py
 uv run pytest -q
 ```
 
-Pour construire le bundle local :
+Pour construire l'archive Windows locale :
+
+```powershell
+.\scripts\build_windows.ps1
+```
+
+Pour construire le bundle PyInstaller macOS/Linux :
 
 ```bash
 uv run pyinstaller --clean --noconfirm fieldlab.spec
 ```
 
-Le résultat se trouve dans `dist/FieldLab`. Un tag correspondant exactement à
-la version du `pyproject.toml`, par exemple `v2.0.0`, déclenche les builds natifs
+Le résultat PyInstaller se trouve dans `dist/FieldLab`. Un tag correspondant exactement à
+la version du `pyproject.toml`, par exemple `v2.0.1`, déclenche les builds natifs
 Windows, macOS et Linux et les publie dans une GitHub Release.
 
 ## Licence

@@ -10,13 +10,13 @@ WINDOWS
 2. Ouvrez le dossier FieldLab.
 3. Double-cliquez sur FieldLab.exe.
 
-Ne déplacez pas FieldLab.exe hors de son dossier et ne supprimez pas le dossier
-_internal : ces éléments sont nécessaires au lancement.
+Ne déplacez pas FieldLab.exe hors de son dossier et ne supprimez pas les DLL ou
+le dossier Lib : ces éléments sont nécessaires au lancement.
 
-Vérifiez dans les propriétés de FieldLab.exe que l'onglet « Signatures
-numériques » est présent. N'utilisez pas une archive sans signature valide :
-SmartScreen ou Smart App Control peut bloquer l'exécutable ou l'un de ses
-modules internes.
+Dans les propriétés de FieldLab.exe, l'onglet « Signatures numériques » doit
+indiquer « Python Software Foundation ». Cette édition Windows fournit toutes
+les fonctions 2D. La vue 3D est désactivée afin d'éviter les DLL VTK bloquées
+par Smart App Control.
 
 MACOS
 -----

@@ -138,6 +138,11 @@ celerybeat.pid
 .venv
 .venv-codex/
 .uv-cache/
+.uv-cache-*/
+.tools/
+.build-cache/
+release-portable-test*/
+.matplotlib-test-cache/
 env/
 venv/
 ENV/

@@ -18,9 +18,10 @@ bundle exact doit être vérifié.
 - Projet et sources : <https://code.qt.io/cgit/pyside/pyside-setup.git/>
 - Conditions : <https://www.qt.io/licensing/open-source-lgpl-obligations>
 
-FieldLab charge les bibliothèques Qt dynamiquement depuis le dossier
-`_internal`. Elles ne doivent pas être fusionnées ni empêchées d'être remplacées
-par l'utilisateur dans une redistribution relevant de la LGPL.
+FieldLab charge les bibliothèques Qt dynamiquement depuis `Lib/site-packages`
+sous Windows et depuis le dossier `_internal` des bundles PyInstaller. Elles ne
+doivent pas être fusionnées ni empêchées d'être remplacées par l'utilisateur
+dans une redistribution relevant de la LGPL.
 
 ### Gmsh
 
@@ -28,6 +29,9 @@ par l'utilisateur dans une redistribution relevant de la LGPL.
 - Licence : GNU GPL version 2 ou ultérieure, avec l'exception de liaison publiée
   par le projet.
 - Projet, licence et sources : <https://gmsh.info/>
+
+Gmsh est présent dans les éditions 3D macOS/Linux, mais pas dans l'édition
+portable Windows 2.0.1 limitée à la 2D.
 
 ### FFmpeg
 
@@ -48,7 +52,7 @@ version de `imageio-ffmpeg`.
 
 | Composant | Usage principal | Licence annoncée par le projet |
 | --- | --- | --- |
-| Python | environnement d'exécution | PSF License |
+| Python / runtime embarquable officiel | environnement d'exécution | PSF License |
 | NumPy | tableaux et calcul numérique | BSD-3-Clause |
 | SciPy | algèbre linéaire creuse | BSD-3-Clause |
 | Matplotlib | figures 2D et exports | licence Matplotlib (compatible PSF/BSD) |
@@ -60,7 +64,10 @@ version de `imageio-ffmpeg`.
 | imageio-ffmpeg | enveloppe Python de FFmpeg | BSD-2-Clause |
 | Pillow | traitement d'images | HPND |
 | meshio | échange de maillages | MIT |
-| PyInstaller | construction du bundle | GPL-2.0-or-later avec exception pour le bootloader |
+| PyInstaller | construction des bundles macOS/Linux | GPL-2.0-or-later avec exception pour le bootloader |
+
+PyVista, PyVistaQt et VTK ne sont pas redistribués dans l'édition Windows 2.0.1.
+Ils restent présents dans les éditions 3D macOS/Linux.
 
 Les versions exactes et leurs empreintes sont verrouillées dans `uv.lock`. Les
 dépendances transitives peuvent ajouter d'autres avis ; leurs fichiers de licence

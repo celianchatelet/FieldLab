@@ -8,12 +8,17 @@ from PySide6.QtWidgets import (
 from fieldlab.app.widgets_i18n import ComboBoxTraduit as QComboBox
 from fieldlab.materials import MATERIAUX, NOMS_MATERIAUX, kappa_pour_domaine
 from fieldlab.app.panels.base import BasePanel, COTES, make_double_spin, make_int_spin
+from fieldlab.app.vtk_compat import THREE_D_AVAILABLE
 from fieldlab.app.vocabulaire_domaine import (
     libelle_parametre_2d, libelle_role,
 )
-from fieldlab.fem3d.scenarios_par_domaine import (
-    NOM_SCENE_LIBRE, SCENARIOS_3D_THERMIQUE,
-)
+if THREE_D_AVAILABLE:
+    from fieldlab.fem3d.scenarios_par_domaine import (
+        NOM_SCENE_LIBRE, SCENARIOS_3D_THERMIQUE,
+    )
+else:
+    NOM_SCENE_LIBRE = "Scène libre"
+    SCENARIOS_3D_THERMIQUE = {}
 from fieldlab.unites import duree_diffusion_suggeree, format_duree
 from fieldlab.i18n import tr
 
@@ -46,7 +51,8 @@ def _scene_libre_thermique_ui(*args, walls=None, **kwargs):
 
 
 _SCENARIOS_3D_THERMIQUE_UI = dict(SCENARIOS_3D_THERMIQUE)
-_SCENARIOS_3D_THERMIQUE_UI[NOM_SCENE_LIBRE] = _scene_libre_thermique_ui
+if THREE_D_AVAILABLE:
+    _SCENARIOS_3D_THERMIQUE_UI[NOM_SCENE_LIBRE] = _scene_libre_thermique_ui
 
 
 class ThermiquePanel(BasePanel):

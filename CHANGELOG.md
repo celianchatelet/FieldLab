@@ -6,6 +6,25 @@ et les versions suivent [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Non publié]
 
+## [2.0.1] - 2026-08-19
+
+### Corrigé
+
+- remplacement du bundle PyInstaller Windows bloqué par Smart App Control par
+  un paquet portable fondé sur le runtime officiel CPython 3.12.10 signé par la
+  Python Software Foundation ;
+- démarrage de l'interface et chargement de `_ctypes`, Qt, NumPy et SciPy sans
+  compte Azure ni certificat payant ;
+- repli propre vers l'interface 2D lorsque VTK n'est pas disponible.
+
+### Modifié
+
+- l'édition Windows 2.0.1 désactive la 3D et n'embarque plus VTK, PyVista ni
+  Gmsh, dont les modules natifs étaient refusés par la stratégie Microsoft ;
+- les éditions macOS/Linux et l'exécution depuis les sources conservent la 3D.
+
+## [2.0.0] - 2026-07-16
+
 ### Ajouté
 
 - mode Cours avec paramètres simplifiés et scénarios pédagogiques ;
@@ -14,9 +33,7 @@ et les versions suivent [Semantic Versioning](https://semver.org/lang/fr/).
 - sondes, profils 1D et comparaison d'une référence A avec un résultat B ;
 - exports PNG 1080p, 1440p et 4K, CSV, GIF et MP4 horodatés ;
 - guide du professeur et documentation de validation scientifique ;
-- bundles autonomes multiplateformes construits par GitHub Actions ;
-- signature Authenticode de tous les composants natifs du bundle Windows avec
-  Azure Artifact Signing, vérifiée avant publication.
+- bundles autonomes multiplateformes construits par GitHub Actions.
 
 ### Limites connues
 
@@ -24,4 +41,6 @@ et les versions suivent [Semantic Versioning](https://semver.org/lang/fr/).
 - le magnétisme 3D utilise Biot–Savart dans le vide ;
 - les modèles 2D supposent une invariance hors plan.
 
-[Non publié]: https://github.com/celianchatelet/FieldLab/commits/main
+[Non publié]: https://github.com/celianchatelet/FieldLab/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/celianchatelet/FieldLab/compare/v2.0.0...v2.0.1
+[2.0.0]: https://github.com/celianchatelet/FieldLab/releases/tag/v2.0.0

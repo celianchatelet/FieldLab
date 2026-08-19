@@ -16,8 +16,8 @@ from fieldlab.sources import NOMS_FORMES
 from fieldlab import viz
 from fieldlab import geometries as geo
 from fieldlab.geometries import NOM_SCENE_LIBRE_2D
-from fieldlab.fem3d import render as fem3d_render
 from fieldlab.app.scene_editor_panel import SceneEditorPanel
+from fieldlab.app.vtk_compat import THREE_D_AVAILABLE, fem3d_render
 from fieldlab.app.vocabulaire_domaine import (
     aide_conditions_limites_3d, conditions_limites_3d,
     defauts_condition_limite_3d, libelle_condition_limite_3d,
@@ -294,6 +294,13 @@ class BasePanel(QWidget):
             self.cb_regime_3d.hide()
         self.cb_dimension = QComboBox()
         self.cb_dimension.addItems(["2D", "3D"])
+        if not THREE_D_AVAILABLE:
+            item_3d = self.cb_dimension.model().item(1)
+            if item_3d is not None:
+                item_3d.setEnabled(False)
+            self.cb_dimension.setItemData(
+                1, "3D désactivée : Windows bloque le composant VTK.",
+                Qt.ItemDataRole.ToolTipRole)
         self.cb_dimension.currentIndexChanged.connect(
             lambda: self._on_dimension_change(self.cb_dimension.currentText()))
         dl.addWidget(self.cb_dimension)
@@ -663,6 +670,11 @@ class BasePanel(QWidget):
 
 
     def _on_dimension_change(self, texte):
+        if texte == "3D" and not THREE_D_AVAILABLE:
+            self.cb_dimension.blockSignals(True)
+            self.cb_dimension.setCurrentText("2D")
+            self.cb_dimension.blockSignals(False)
+            texte = "2D"
         est_3d = (texte == "3D")
         self.conteneur_2d.setVisible(not est_3d)
         self.conteneur_3d.setVisible(est_3d)

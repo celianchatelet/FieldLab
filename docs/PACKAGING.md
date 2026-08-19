@@ -1,14 +1,14 @@
 # Packaging et publication de FieldLab
 
-FieldLab utilise un bundle PyInstaller **one-dir**. Les plugins Qt, VTK, Gmsh
-et FFmpeg sont trop volumineux et trop dynamiques pour qu'un exécutable unique
-soit aussi fiable et rapide au démarrage.
+FieldLab utilise deux formats de distribution :
+
+- Windows : un paquet Python portable compatible avec Smart App Control ;
+- macOS et Linux : un bundle PyInstaller **one-dir**.
 
 ## Construire et archiver sous Windows
 
-La commande recommandée exécute les tests, reconstruit le bundle, ajoute la
-documentation visible et produit une archive accompagnée de son empreinte
-SHA-256 :
+La commande recommandée exécute les tests, construit le paquet portable, ajoute
+la documentation puis produit l'archive et son empreinte SHA-256 :
 
 ```powershell
 .\scripts\build_windows.ps1
@@ -17,17 +17,36 @@ SHA-256 :
 Options utiles pendant le développement :
 
 ```powershell
-# Réutiliser le dossier dist/FieldLab existant
+# Réutiliser release/FieldLab
 .\scripts\build_windows.ps1 -SkipBuild
 
 # Reconstruire sans relancer les tests
 .\scripts\build_windows.ps1 -SkipTests
 ```
 
-Les résultats sont `FieldLab-Windows.zip` et
-`FieldLab-Windows.zip.sha256` à la racine du projet.
+Le constructeur interne peut aussi être appelé directement :
 
-## Build PyInstaller seul
+```powershell
+.\scripts\build_windows_portable.ps1 -OutputDirectory release\FieldLab
+```
+
+Il télécharge le paquet embarquable officiel CPython 3.12.10, vérifie son
+SHA-256 (`4ACBED6DD1C744B0376E3B1CF57CE906F9DC9E95E68824584C8099A63025A3C3`),
+installe les dépendances verrouillées et copie les sources de FieldLab. Le
+lanceur `FieldLab.exe` est une copie, sans modification binaire, de
+`pythonw.exe` : sa signature Authenticode de la Python Software Foundation reste
+donc valide.
+
+Smart App Control refuse les extensions VTK diffusées sur PyPI sur certaines
+machines. Elles ne sont pas incluses dans l'archive Windows 2.0.1 : la 3D est
+désactivée dans cette édition, tandis que les simulations, mesures et exports 2D
+restent disponibles. Les versions macOS/Linux et l'exécution depuis les sources
+conservent la 3D.
+
+Ne distribuez jamais `FieldLab.exe` seul. Les DLL du runtime et le dossier
+`Lib\site-packages` placés à côté sont indispensables.
+
+## Construire sous macOS et Linux
 
 ```bash
 uv sync --extra dev
@@ -35,8 +54,8 @@ uv run pytest -q
 uv run pyinstaller --clean --noconfirm fieldlab.spec
 ```
 
-Le bundle brut se trouve dans `dist/FieldLab`. Il ne faut jamais distribuer
-`FieldLab.exe` seul : le dossier `_internal` placé à côté est indispensable.
+Le résultat brut se trouve dans `dist/FieldLab.app` sous macOS et
+`dist/FieldLab` sous Linux.
 
 ## Contenu d'une archive publiée
 
@@ -49,97 +68,50 @@ Chaque archive finale contient :
 - `THIRD_PARTY_NOTICES.md` ;
 - `CITATION.cff`.
 
-Le spec collecte explicitement `vtkmodules`, `pyvista`, `pyvistaqt` et
-`imageio_ffmpeg`. Il recherche aussi la bibliothèque native Gmsh à côté de
-`gmsh.py`, car le wheel peut la placer dans `Lib/`, `lib/` ou sous la forme
-`libgmsh.*`. L'exécutable FFmpeg fourni par `imageio-ffmpeg` est inclus comme
-donnée du paquet.
-
 ## Publication GitHub
 
 Le workflow `.github/workflows/release.yml` est déclenché par un tag `v*`. Il :
 
 1. vérifie que le tag correspond à la version de `pyproject.toml` ;
 2. vérifie `uv.lock` et exécute les tests ;
-3. construit un bundle natif sous Windows, macOS et Linux ;
-4. signe sous Windows tous les fichiers `.exe`, `.dll` et `.pyd` avec Azure
-   Artifact Signing ;
-5. vérifie que toutes les signatures Authenticode sont valides ;
-6. ajoute les documents de distribution ;
-7. calcule une empreinte SHA-256 ;
-8. joint les archives et les empreintes à la GitHub Release.
+3. construit le paquet portable Windows et les bundles macOS/Linux ;
+4. vérifie la signature du runtime Windows ;
+5. calcule une empreinte SHA-256 ;
+6. joint les archives et les empreintes à la GitHub Release.
 
-### Configurer la signature Windows
+Aucun compte Azure, certificat payant ou secret de signature n'est nécessaire.
 
-La publication Windows échoue volontairement si la signature n'est pas
-configurée. Cela empêche de republier une archive que Smart App Control
-bloquerait au chargement d'un module Python natif.
-
-Créez un compte **Azure Artifact Signing** avec un profil de certificat
-**Public Trust**, puis attribuez le rôle `Artifact Signing Certificate Profile
-Signer` à l'application Microsoft Entra utilisée par GitHub Actions. Configurez
-une identité fédérée OIDC limitée au dépôt `celianchatelet/FieldLab`.
-
-Ajoutez ensuite les paramètres suivants dans
-`Settings → Secrets and variables → Actions` du dépôt GitHub :
-
-- secrets : `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
-  `AZURE_SUBSCRIPTION_ID` ;
-- variables : `ARTIFACT_SIGNING_ENDPOINT`,
-  `ARTIFACT_SIGNING_ACCOUNT_NAME`,
-  `ARTIFACT_SIGNING_CERTIFICATE_PROFILE`.
-
-Le profil doit utiliser un certificat RSA délivré par une autorité reconnue par
-Microsoft. Un certificat autosigné ne suffit pas pour Smart App Control. Le
-workflow horodate les signatures, conserve les éventuelles signatures tierces
-et signe récursivement l'intégralité du bundle natif avant compression.
-
-Pour contrôler manuellement un bundle signé :
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File `
-  .\scripts\verify_windows_signatures.ps1 -BundlePath dist/FieldLab
-```
-
-Exemple pour la version 2.0.0 :
+Exemple :
 
 ```bash
-git tag -a v2.0.0 -m "FieldLab 2.0.0"
-git push origin v2.0.0
+git tag -a v2.0.1 -m "FieldLab 2.0.1"
+git push origin v2.0.1
 ```
 
 Ne créez le tag qu'après validation du commit sur lequel il pointe.
 
 ## Pièges connus
 
-- **Gmsh** : une erreur de chargement de `gmsh-*.dll`, `libgmsh.so` ou
-  `libgmsh.dylib` signifie que la bibliothèque native n'a pas suivi `gmsh.py`.
+- **Windows/VTK** : l'édition portable Windows 2.0.1 est volontairement limitée
+  à la 2D afin d'éviter les DLL VTK refusées par Smart App Control.
 - **Linux/OpenGL** : la machine de build a besoin de `libGL`, `libEGL` et
-  `libGLU`. Une machine cible minimale peut encore nécessiter des bibliothèques
-  graphiques système.
-- **Plugins Qt** : le dossier `PySide6/plugins/platforms` doit contenir le plugin
-  natif (`qwindows`, `qcocoa` ou `qxcb`).
-- **VTK/PyVista** : les imports sont dynamiques. Tester une scène 3D après toute
-  modification du spec ou des exclusions.
-- **macOS** : `FieldLab.app` n'est ni signé ni notarisé. Gatekeeper demandera une
-  confirmation au premier lancement.
-- **Windows** : SmartScreen et Smart App Control peuvent bloquer un binaire
-  sans réputation. Il faut signer l'exécutable, mais aussi toutes les DLL et
-  extensions Python `.pyd` chargées par l'application.
-- **Licences** : le bundle contient des bibliothèques LGPL/GPL et un binaire
-  FFmpeg GPLv3. Vérifier `THIRD_PARTY_NOTICES.md` et conserver les avis associés.
+  `libGLU`.
+- **Plugins Qt** : les plugins natifs de la plateforme doivent rester dans le
+  paquet.
+- **macOS** : `FieldLab.app` n'est ni signé ni notarifié. Gatekeeper demandera
+  une confirmation au premier lancement.
+- **Licences** : conserver `THIRD_PARTY_NOTICES.md` avec chaque archive.
 
 ## Test à froid obligatoire avant diffusion
 
 Sur une machine sans Python :
 
 1. télécharger l'archive depuis le même lien que les destinataires ;
-2. vérifier son SHA-256 puis la décompresser ;
-3. lancer FieldLab ;
+2. vérifier son SHA-256 puis la décompresser entièrement ;
+3. lancer `FieldLab.exe` et confirmer l'absence de blocage Windows ;
 4. ouvrir un scénario 2D dans chacun des trois domaines ;
-5. ouvrir une scène 3D et vérifier la rotation ;
-6. exporter un PNG et un MP4 ;
-7. fermer puis relancer l'application.
+5. lancer une simulation puis exporter un PNG et un MP4 ;
+6. fermer puis relancer l'application.
 
 Ce test manuel reste nécessaire même si la construction et les tests automatisés
 réussissent.
